@@ -196,14 +196,14 @@ func finishRegistration(c *fiber.Ctx) error {
 
 	log.Printf("Registration successful for %s (%s)! Stored CredID: %s, AAGUID: %s, Name: %s", sessionData.User.DisplayName, email, payload.ID, result.AAGUID, result.AuthenticatorName)
 
-	// 8. clear active challenge
+	// 7. Clear active challenge
 	err = deleteChallenge(payload.ClientData().Challenge)
 	if err != nil {
 		log.Printf("Warning: Failed to delete challenge: %v", err)
 	}
 	log.Printf("Removed active challenge for %s", email)
 
-	// 9. Reply to the client
+	// 8. Reply to the client
 	return c.JSON(fiber.Map{
 		"success":           true,
 		"authenticatorName": result.AuthenticatorName,
