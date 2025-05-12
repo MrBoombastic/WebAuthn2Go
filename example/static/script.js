@@ -8,35 +8,18 @@ if (!window.PublicKeyCredential) {
 }
 
 // Helper functions for base64url encoding/decoding
-function base64urlToBuffer(base64url) {
-    // Convert base64url to base64 by replacing URL-safe chars and adding padding
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-    const paddingLength = (4 - (base64.length % 4)) % 4;
-    const padded = base64 + '='.repeat(paddingLength);
-
-    // Convert base64 to binary string
-    const binary = atob(padded);
-
-    // Convert binary string to buffer
-    const buffer = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-        buffer[i] = binary.charCodeAt(i);
-    }
-    return buffer;
+function base64urlToBuffer(base64URL) {
+    const base64 = base64URL.replace(/-/g, '+').replace(/_/g, '/');
+    const padLen = (4 - (base64.length % 4)) % 4;
+    return Uint8Array.from(atob(base64.padEnd(base64.length + padLen, '=')), c => c.charCodeAt(0));
 }
 
 function bufferToBase64url(buffer) {
-    // Convert buffer to binary string
-    let binary = '';
     const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
+    let string = '';
+    bytes.forEach(b => string += String.fromCharCode(b));
 
-    // Convert binary string to base64
-    const base64 = btoa(binary);
-
-    // Convert base64 to base64url
+    const base64 = btoa(string);
     return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
