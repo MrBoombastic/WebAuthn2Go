@@ -132,7 +132,8 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResul
 		CredentialID:      credIDStr, // Return base64url encoded ID
 		PublicKey:         authData.CredentialPubKeyBytes,
 		AAGUID:            authData.AAGUID.String(),
-		AuthenticatorName: name,               // Use the looked-up name (or default)
-		SignCount:         authData.SignCount, // Set the initial sign count from authData
+		AuthenticatorName: name,                // Use the looked-up name (or default)
+		SignCount:         authData.SignCount,  // Set the initial sign count from authData
+		Extensions:        authData.Extensions, // Set ED if present
 	}, nil
 }

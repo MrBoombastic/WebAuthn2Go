@@ -20,7 +20,7 @@ type ParsedAuthData struct {
 	AAGUID                uuid.UUID // Present if AT flag is set
 	CredentialID          []byte    // Present if AT flag is set
 	CredentialPubKeyBytes []byte
-	Extensions            map[string]interface{} // Present if ED flag is set
+	Extensions            map[string]any // Present if ED flag is set
 }
 
 const minimalDataLen = 37 // Minimal: RPIDHash + flags + sign count = magic number

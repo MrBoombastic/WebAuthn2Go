@@ -82,6 +82,7 @@ type RegistrationResult struct {
 	AAGUID            string
 	AuthenticatorName string
 	SignCount         uint32
+	Extensions        map[string]any // optional
 }
 
 // LoginResult holds the successful result of an authentication (login) ceremony.
