@@ -127,7 +127,7 @@ func main() {
 
 ## Dependencies
 
-* `github.com/google/uuid` additional library for AAGUID subpackage
+* `github.com/google/uuid` additional library used for AAGUID subpackage
 * `github.com/go-webauthn/webauthn/protocol/webauthncbor` for CBOR decoding.
 * `github.com/go-webauthn/webauthn/protocol/webauthncose` for parsing COSE public keys.
 

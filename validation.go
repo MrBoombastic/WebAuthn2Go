@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
+
 	"github.com/MrBoombastic/WebAuthn2Go/utils"
 	"github.com/go-webauthn/webauthn/protocol/webauthncose"
 )

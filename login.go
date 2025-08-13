@@ -3,6 +3,7 @@ package webauthn
 import (
 	"errors"
 	"fmt"
+
 	"github.com/MrBoombastic/WebAuthn2Go/utils"
 )
 

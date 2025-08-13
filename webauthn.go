@@ -4,9 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/gofiber/fiber/v2/log"
 	"net/url"
 	"strings"
+
+	"github.com/gofiber/fiber/v2/log"
 )
 
 // New creates a new WebAuthn instance with the provided configuration.

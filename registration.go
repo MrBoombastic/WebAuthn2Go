@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+
 	"github.com/MrBoombastic/WebAuthn2Go/aaguid"
 	"github.com/MrBoombastic/WebAuthn2Go/utils"
 	"github.com/go-webauthn/webauthn/protocol/webauthncbor"

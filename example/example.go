@@ -2,8 +2,9 @@ package main
 
 import (
 	"database/sql"
-	webauthn "github.com/MrBoombastic/WebAuthn2Go"
 	"log"
+
+	webauthn "github.com/MrBoombastic/WebAuthn2Go"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"

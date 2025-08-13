@@ -3,6 +3,7 @@ package webauthn
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/MrBoombastic/WebAuthn2Go/utils"
 )
 
