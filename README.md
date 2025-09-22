@@ -11,20 +11,21 @@ authentication.
 
 * **WebAuthn Server Logic:** Handles core server-side registration and authentication ceremonies.
 * **Attestation Support:**
-  * Accepts `"none"`, `"indirect"`, and `"packed"` attestation formats.
-    * Currently, **skips cryptographic verification** of attestation statements (`AttStmt`), focusing on extracting
-      authenticator data (`AuthData`) including AAGUID and Public Key.
+    * Accepts `none`, `indirect`, and `packed` attestation formats.
+        * Currently, **skips cryptographic verification** of attestation statements (`AttStmt`), focusing on extracting
+          authenticator data (`AuthData`) including AAGUID and Public Key.
 * **Assertion Verification:** Validates login assertions including challenge, origin, RP ID, user presence/verification
   flags, and signature.
 * **Sign Count Protection:** Checks for increasing sign counts to help prevent replay attacks (requires secure storage
   by the caller).
 * **AAGUID Lookup:** Provides a utility to look up authenticator names based on AAGUID.
+* **Extensions Support:** Basic support for WebAuthn extensions.
 * **Configuration:** Simple configuration for Relying Party details.
 
 ## Why this library?
 
 This library is designed to be easy to use and integrate into existing Go applications. You don't need to especially
-implement custom interfaces or convert your Fiber's fasthttp.Request into http.Request, like
+implement custom interfaces or convert your Fiber's `fasthttp.Request` into `http.Request`, like
 in https://github.com/go-webauthn/webauthn. There are no other alternatives, except
 the https://github.com/egregors/passkey, which is a wrapper around the first one, which additionally can set cookies for
 you.
@@ -37,7 +38,7 @@ This library is not intended to be a full-fledged WebAuthn implementation. It do
 for example. This library is also in early development, so may be not suitable for production use yet.
 
 The library is also not popular. It's possible that this repo has more or less zero stars and has never been reviewed or
-used by the 3rd party. So, if you are looking for a battle-tested library, this is not the one.
+used by the third party. So, if you are looking for a battle-tested library, this is not the one.
 
 One more thing - **the code is written with the partial help of AI**. Although the author tried his best to understand
 WebAuthn
@@ -47,9 +48,12 @@ risk.
 
 Used sources:
 
-- https://www.corbado.com/glossary/attestation and other glossary entries - easy readable
+- https://www.corbado.com/glossary/attestation and other glossary entries - readable, but sometimes too simple
 - https://webauthn.guide/ - general overview
 - https://www.w3.org/TR/webauthn/ - THE specification
+
+> [!WARNING]
+> This library supports only Go 1.24 and above.
 
 ## Example
 
@@ -144,7 +148,9 @@ popular libraries is a safer choice.
 * **Origin/RP ID Configuration:** Incorrect `RPID` or `RPOrigins` configuration will break functionality and is a
   security boundary.
 * **Attestation Verification:** This library currently **does not** perform cryptographic verification of attestation
-  statements for `"indirect"` or `"packed"` formats. It only parses the authenticator data. If you require stricter
+  statements for `indirect` or `packed` formats.
+  It only parses the authenticator data.
+  If you require stricter
   verification of authenticator provenance, you would need to implement the specific verification logic for those
   formats.
 

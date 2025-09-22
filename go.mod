@@ -1,11 +1,9 @@
 module github.com/MrBoombastic/WebAuthn2Go
 
-go 1.23.0
-
-toolchain go1.24.1
+go 1.24.0
 
 require (
-	github.com/go-webauthn/webauthn v0.13.4
+	github.com/go-webauthn/webauthn v0.14.0
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
 )
@@ -15,5 +13,5 @@ require (
 	github.com/google/go-tpm v0.9.5 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/sys v0.36.0 // indirect
 )
