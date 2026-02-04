@@ -4,10 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
-
-	"github.com/gofiber/fiber/v2/log"
 )
 
 // New creates a new WebAuthn instance with the provided configuration.
@@ -55,8 +54,8 @@ func New(config *Config) (*WebAuthn, error) {
 	}
 
 	if config.Debug {
-		log.Debug("INFO: WebAuthn debug enabled, config:")
-		log.Debugf("%+v", *config)
+		log.Println("INFO: WebAuthn debug enabled, config:")
+		log.Printf("%+v", *config)
 	}
 
 	return &WebAuthn{
