@@ -44,4 +44,5 @@ var (
 	ErrFailedDecodeExtensionData                   = errors.New("failed to decode extension data")
 	ErrFailedUnmarshalPublicKeyCredential          = errors.New("failed to unmarshal public key credential")
 	ErrFailedUnmarshalPublicKeyCredentialAssertion = errors.New("failed to unmarshal public key credential assertion")
+	ErrCrossOriginNotAllowed                       = errors.New("cross-origin authentication not allowed")
 )

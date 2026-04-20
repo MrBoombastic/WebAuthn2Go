@@ -71,6 +71,10 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResul
 		return nil, err
 	}
 
+	if clientData.CrossOrigin {
+		return nil, ErrCrossOriginNotAllowed
+	}
+
 	// FLOW 4: CBOR decode attestation
 	var attObj attestationObject
 	decodedAttestationObject, err := base64.RawURLEncoding.DecodeString(data.AttestationObject)
@@ -98,7 +102,7 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResul
 
 	// Validate authenticator data flags and RP ID hash
 	if subtle.ConstantTimeCompare(authData.RPIDHash, expectedRPIDHash[:]) == 0 {
-		return nil, fmt.Errorf("%w: %w", ErrRPIDHashMismatch, err)
+		return nil, ErrRPIDHashMismatch
 	}
 	if authData.Flags&0x01 == 0 {
 		return nil, ErrUserPresentFlagNotSet

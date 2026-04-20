@@ -300,6 +300,8 @@ func finishLogin(c *fiber.Ctx) error {
 		Signature:       payload.Signature,
 		StoredSignCount: sessionData.SignCount,
 		PublicKey:       sessionData.PublicKey,
+		UserHandle:      payload.UserHandle,
+		CredentialID:    payload.ID,
 	}
 
 	// 6. Call library function

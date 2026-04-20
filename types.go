@@ -89,6 +89,8 @@ type RegistrationResult struct {
 type LoginResult struct {
 	NewSignCount uint32 `json:"newSignCount"`
 	UserVerified bool   `json:"userVerified"`
+	CredentialID string `json:"credentialID"`
+	UserHandle   string `json:"userHandle"`
 }
 
 // ValidationOutput holds results from the internal validateAssertion method.
@@ -137,7 +139,7 @@ type PublicKeyCredentialRequestOptions struct {
 	Challenge        string                          `json:"challenge"`
 	Timeout          uint32                          `json:"timeout"`
 	RPID             string                          `json:"rpId"`
-	AllowCredentials []PublicKeyCredentialDescriptor `json:"allowCredentials"`
+	AllowCredentials []PublicKeyCredentialDescriptor `json:"allowCredentials,omitempty"`
 	UserVerification UserVerificationRequirement     `json:"userVerification"`
 }
 
@@ -149,10 +151,10 @@ type attestationObject struct {
 
 // ClientData represents the common structure of client data in both registration and login
 type ClientData struct {
-	Type      string `json:"type"`
-	Challenge string `json:"challenge"`
-	RPOrigin  string `json:"origin"`
-	//CrossOrigin bool   `json:"crossOrigin"` todo: support this
+	Type        string `json:"type"`
+	Challenge   string `json:"challenge"`
+	RPOrigin    string `json:"origin"`
+	CrossOrigin bool   `json:"crossOrigin"`
 }
 
 type LoginData struct {
@@ -161,4 +163,6 @@ type LoginData struct {
 	Signature       string `json:"signature"`
 	StoredSignCount uint32 `json:"storedSignCount"`
 	PublicKey       []byte `json:"publicKey"`
+	UserHandle      string `json:"userHandle"`
+	CredentialID    string `json:"credentialID"`
 }

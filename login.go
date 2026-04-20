@@ -18,11 +18,14 @@ func (w *WebAuthn) BeginLogin(allowedCredentialIDs []string) (*PublicKeyCredenti
 		return nil, err
 	}
 
-	allowedCredentials := make([]PublicKeyCredentialDescriptor, len(allowedCredentialIDs))
-	for i, credID := range allowedCredentialIDs {
-		allowedCredentials[i] = PublicKeyCredentialDescriptor{
-			Type: "public-key",
-			ID:   credID,
+	var allowedCredentials []PublicKeyCredentialDescriptor
+	if len(allowedCredentialIDs) > 0 {
+		allowedCredentials = make([]PublicKeyCredentialDescriptor, len(allowedCredentialIDs))
+		for i, credID := range allowedCredentialIDs {
+			allowedCredentials[i] = PublicKeyCredentialDescriptor{
+				Type: "public-key",
+				ID:   credID,
+			}
 		}
 	}
 
@@ -50,5 +53,7 @@ func (w *WebAuthn) FinishLogin(data *LoginData) (*LoginResult, error) {
 	return &LoginResult{
 		NewSignCount: res.NewSignCount,
 		UserVerified: res.UserVerified,
+		CredentialID: data.CredentialID,
+		UserHandle:   data.UserHandle,
 	}, nil
 }

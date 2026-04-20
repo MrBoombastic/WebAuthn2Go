@@ -26,6 +26,10 @@ func (w *WebAuthn) ValidateLoginData(c *LoginData) (out ValidationOutput, err er
 		return ValidationOutput{}, err
 	}
 
+	if clientData.CrossOrigin {
+		return out, ErrCrossOriginNotAllowed
+	}
+
 	// Parse and validate AuthenticatorData
 	decodedAuthData, err := utils.DecodeBase64URL(c.AuthData)
 	if err != nil {
