@@ -11,7 +11,6 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/google/uuid"
 	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 var (
