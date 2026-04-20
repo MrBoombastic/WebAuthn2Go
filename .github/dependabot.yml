@@ -3,4 +3,21 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "gomod"
+    directory: "/example"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "gomod"
+    directory: "/example_aaguid"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
