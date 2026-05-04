@@ -3,7 +3,7 @@ module github.com/MrBoombastic/WebAuthn2Go
 go 1.25.0
 
 require (
-	github.com/go-webauthn/webauthn v0.16.5
+	github.com/go-webauthn/webauthn v0.17.2
 	github.com/google/uuid v1.6.0
 )
 
