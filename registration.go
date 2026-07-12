@@ -9,7 +9,6 @@ import (
 	"github.com/MrBoombastic/WebAuthn2Go/aaguid"
 	"github.com/MrBoombastic/WebAuthn2Go/utils"
 	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
-	"github.com/go-webauthn/webauthn/protocol/webauthncose"
 )
 
 // defaultPubKeyCredParams sets up most common algorithms for public key credential parameters.
@@ -49,11 +48,17 @@ func (w *WebAuthn) BeginRegistration(user UserEntity) (navigator *BeginRegistrat
 	}, nil
 }
 
-// FinishRegistration completes the WebAuthn registration process
-// FLOW 1: pass data
-func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResult, error) {
+// FinishRegistration completes the WebAuthn registration process.
+// expectedChallenge must be loaded from a trusted, server-side ceremony state.
+// consume must atomically reject expiry, reuse, and any ceremony type other
+// than CeremonyRegistration before deleting the challenge.
+func (w *WebAuthn) FinishRegistration(data RegistrationData, expectedChallenge string, consume ChallengeConsumer) (*RegistrationResult, error) {
+	// FLOW 1: pass data
 	if w == nil {
 		return nil, ErrNilInstance
+	}
+	if w.Config == nil {
+		return nil, ErrNilConfig
 	}
 
 	// FLOW 2: parse client data
@@ -66,6 +71,9 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResul
 	if clientData.Type != "webauthn.create" {
 		return nil, fmt.Errorf("%w, got %s", ErrTypeNotWebauthnCreate, clientData.Type)
 	}
+	if err := validateChallenge(expectedChallenge, clientData.Challenge); err != nil {
+		return nil, err
+	}
 
 	if allowed, err := w.isAllowedOrigin(clientData.RPOrigin); !allowed {
 		return nil, err
@@ -77,7 +85,7 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResul
 
 	// FLOW 4: CBOR decode attestation
 	var attObj attestationObject
-	decodedAttestationObject, err := base64.RawURLEncoding.DecodeString(data.AttestationObject)
+	decodedAttestationObject, err := decodeBase64URL(data.AttestationObject, MaxAttestationObjectSize, "attestation object")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFailedDecodeAttestationObject, err)
 	}
@@ -107,6 +115,9 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResul
 	if authData.Flags&0x01 == 0 {
 		return nil, ErrUserPresentFlagNotSet
 	}
+	if authData.Flags&0x40 == 0 {
+		return nil, ErrMissingAttestedCredentialData
+	}
 
 	// Check UV flag (bit 2) in authData.Flags
 	if w.Config.UserVerification == UVRequired {
@@ -116,21 +127,24 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData) (*RegistrationResul
 	}
 
 	// Extract public key - must be present
-	if authData.CredentialPubKeyBytes == nil {
-		return nil, ErrMissingPublicKey
-	} // Check if the public key is valid
-	if _, err := webauthncose.ParsePublicKey(authData.CredentialPubKeyBytes); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidPublicKey, err)
+	if _, err := validateCredentialPublicKey(authData.CredentialPubKeyBytes); err != nil {
+		return nil, err
 	}
 
 	// CredentialID must also be present for registration.
-	if authData.CredentialID == nil {
+	if len(authData.CredentialID) == 0 {
 		return nil, ErrMissingCredentialID
+	}
+	if len(authData.CredentialID) > MaxCredentialIDSize {
+		return nil, fmt.Errorf("%w: got %d bytes", ErrCredentialIDTooLarge, len(authData.CredentialID))
 	}
 
 	// Convert CredentialID to base64url string for storage/transport
 	credIDStr := base64.RawURLEncoding.EncodeToString(authData.CredentialID)
 	name := aaguid.LookupAuthenticatorUUID(authData.AAGUID)
+	if err := consumeChallenge(consume, expectedChallenge, CeremonyRegistration); err != nil {
+		return nil, err
+	}
 
 	return &RegistrationResult{
 		CredentialID:      credIDStr, // Return base64url encoded ID

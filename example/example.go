@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"log"
+	"time"
 
 	webauthn "github.com/MrBoombastic/WebAuthn2Go"
 
@@ -32,6 +33,18 @@ func sendJSONError(c *fiber.Ctx, statusCode int, message string, err error) erro
 	return c.Status(statusCode).JSON(fiber.Map{
 		"error": message,
 	})
+}
+
+func shortChallenge(challenge string) string {
+	const prefixLength = 10
+	if len(challenge) <= prefixLength {
+		return challenge
+	}
+	return challenge[:prefixLength]
+}
+
+func ceremonyExpiration() time.Time {
+	return time.Now().Add(time.Duration(w.Config.Timeout) * time.Millisecond)
 }
 
 func main() {
@@ -134,7 +147,7 @@ func beginRegistration(c *fiber.Ctx) error {
 	}
 
 	// 7. Store challenge
-	err = saveChallenge(opts.Challenge, newUser.Name)
+	err = saveChallenge(opts.Challenge, newUser.Name, webauthn.CeremonyRegistration, ceremonyExpiration())
 	if err != nil {
 		return sendJSONError(c, fiber.StatusInternalServerError, "Failed to save challenge", err)
 	}
@@ -154,20 +167,26 @@ func finishRegistration(c *fiber.Ctx) error {
 		return sendJSONError(c, fiber.StatusBadRequest, "Failed to parse request body", err)
 	}
 
-	// 2. Extract challenge and find associated email, DO NOT go further if challenge is mismatched
-	email, err := getEmailByChallenge(payload.ClientData().Challenge)
+	// 2. Look up the trusted server-side ceremony record. The value returned by
+	// the database, rather than the raw client value, is passed to FinishRegistration.
+	challengeRecord, err := getStoredChallenge(payload.ClientData().Challenge, webauthn.CeremonyRegistration)
 	if err != nil {
-		log.Printf("Challenge not found or expired: %s", payload.ClientData().Challenge[:10])
+		log.Printf("Challenge not found or expired: %s", shortChallenge(payload.ClientData().Challenge))
 		return sendJSONError(c, fiber.StatusBadRequest, "Registration challenge not found or expired", nil)
 	}
+	email := challengeRecord.Email
 	log.Printf("Found active challenge for email: %s", email)
 
 	// 3. Retrieve user session data
 	sessionData, err := getUser(email)
 	if err != nil {
 		log.Printf("User session not found for email: %s, although challenge existed.", email)
-		deleteChallenge(payload.ClientData().Challenge) // clear dangling challenge
+		deleteChallenge(challengeRecord.Challenge, challengeRecord.Email, challengeRecord.Ceremony) // clear dangling challenge
 		return sendJSONError(c, fiber.StatusInternalServerError, "User session data not found", nil)
+	}
+	if sessionData.CredID != "" || len(sessionData.PublicKey) != 0 {
+		_ = deleteChallenge(challengeRecord.Challenge, challengeRecord.Email, challengeRecord.Ceremony)
+		return sendJSONError(c, fiber.StatusConflict, "User already has a registered credential", nil)
 	}
 
 	log.Printf("Finish Registration - User: %s, Email: %s, Credential ID: %s", sessionData.User.DisplayName, email, payload.ID)
@@ -178,11 +197,12 @@ func finishRegistration(c *fiber.Ctx) error {
 		AttestationObject: payload.AttestationObject,
 	}
 
-	// 5. Call library
-	result, err := w.FinishRegistration(registrationData)
+	// 5. Validate against the trusted challenge and atomically consume it only
+	// after the library has accepted the registration response.
+	result, err := w.FinishRegistration(registrationData, challengeRecord.Challenge, func(challenge string, ceremony webauthn.CeremonyType) error {
+		return consumeStoredChallenge(challenge, email, ceremony)
+	})
 	if err != nil {
-		// clear challenge if registration fails
-		deleteChallenge(payload.ClientData().Challenge)
 		log.Printf("FinishRegistration failed for email %s: %v", email, err)
 		return sendJSONError(c, fiber.StatusBadRequest, "Registration verification failed", err)
 	}
@@ -190,18 +210,13 @@ func finishRegistration(c *fiber.Ctx) error {
 	// 6. Store the credential details in the database
 	err = updateUserCredentials(email, result.CredentialID, result.PublicKey, result.SignCount)
 	if err != nil {
-		deleteChallenge(payload.ClientData().Challenge)
 		return sendJSONError(c, fiber.StatusInternalServerError, "Failed to store credentials", err)
 	}
 
 	log.Printf("Registration successful for %s (%s)! Stored CredID: %s, AAGUID: %s, Name: %s", sessionData.User.DisplayName, email, payload.ID, result.AAGUID, result.AuthenticatorName)
 
-	// 7. Clear active challenge
-	err = deleteChallenge(payload.ClientData().Challenge)
-	if err != nil {
-		log.Printf("Warning: Failed to delete challenge: %v", err)
-	}
-	log.Printf("Removed active challenge for %s", email)
+	// The callback passed to FinishRegistration already consumed the challenge.
+	log.Printf("Consumed active challenge for %s", email)
 
 	// 8. Reply to the client
 	return c.JSON(fiber.Map{
@@ -248,7 +263,7 @@ func beginLogin(c *fiber.Ctx) error {
 	}
 
 	// 5. Store challenge
-	err = saveChallenge(opts.Challenge, reqBody.Email)
+	err = saveChallenge(opts.Challenge, reqBody.Email, webauthn.CeremonyAuthentication, ceremonyExpiration())
 	if err != nil {
 		return sendJSONError(c, fiber.StatusInternalServerError, "Failed to save challenge", err)
 	}
@@ -268,19 +283,21 @@ func finishLogin(c *fiber.Ctx) error {
 		return sendJSONError(c, fiber.StatusBadRequest, "Failed to parse request body", err)
 	}
 
-	// 2. Extract challenge and find associated email
-	email, err := getEmailByChallenge(payload.GetChallenge())
+	// 2. Look up the trusted server-side ceremony record. The value returned by
+	// the database, rather than the raw client value, is passed to FinishLogin.
+	challengeRecord, err := getStoredChallenge(payload.GetChallenge(), webauthn.CeremonyAuthentication)
 	if err != nil {
-		log.Printf("Login challenge not found or expired: %s...", payload.GetChallenge()[:10])
+		log.Printf("Login challenge not found or expired: %s...", shortChallenge(payload.GetChallenge()))
 		return sendJSONError(c, fiber.StatusBadRequest, "Login challenge expired or not found", nil)
 	}
+	email := challengeRecord.Email
 	log.Printf("Found active login challenge for email: %s", email)
 
 	// 3. Retrieve user session data
 	sessionData, err := getUser(email)
 	if err != nil {
 		log.Printf("User session not found for email: %s, although challenge existed.", email)
-		deleteChallenge(payload.GetChallenge()) // clear
+		deleteChallenge(challengeRecord.Challenge, challengeRecord.Email, challengeRecord.Ceremony) // clear
 		return sendJSONError(c, fiber.StatusInternalServerError, "User session data not found during login finish", nil)
 	}
 
@@ -289,44 +306,40 @@ func finishLogin(c *fiber.Ctx) error {
 	// 4. Verify credential ID matches stored ID
 	if payload.ID != sessionData.CredID {
 		log.Printf("Credential ID mismatch for user %s. Expected: %s, Got: %s", sessionData.User.DisplayName, sessionData.CredID, payload.ID)
-		deleteChallenge(payload.GetChallenge()) // clear challenge
 		return sendJSONError(c, fiber.StatusBadRequest, "Credential ID mismatch", nil)
 	}
 
 	// 5. Prepare data for the library
 	loginData := webauthn.LoginData{
-		ClientDataJSON:  payload.ClientDataJSON,
-		AuthData:        payload.AuthenticatorData,
-		Signature:       payload.Signature,
-		StoredSignCount: sessionData.SignCount,
-		PublicKey:       sessionData.PublicKey,
-		UserHandle:      payload.UserHandle,
-		CredentialID:    payload.ID,
+		ClientDataJSON: payload.ClientDataJSON,
+		AuthData:       payload.AuthenticatorData,
+		Signature:      payload.Signature,
+		UserHandle:     payload.UserHandle,
+		CredentialID:   payload.ID,
+		StoredCredential: webauthn.StoredCredential{
+			ID:         sessionData.CredID,
+			PublicKey:  sessionData.PublicKey,
+			SignCount:  sessionData.SignCount,
+			UserHandle: sessionData.User.ID,
+		},
 	}
 
-	// 6. Call library function
-	result, err := w.FinishLogin(&loginData)
+	// 6. Validate against the trusted challenge, then atomically consume it and
+	// compare-and-swap the stored signature counter.
+	result, err := w.FinishLogin(&loginData, challengeRecord.Challenge, func(challenge string, ceremony webauthn.CeremonyType, credentialID string, previousSignCount, newSignCount uint32) error {
+		return commitLoginState(challenge, email, ceremony, credentialID, previousSignCount, newSignCount)
+	})
 	if err != nil {
-		// clear challenge if login fails
-		deleteChallenge(payload.GetChallenge())
 		log.Printf("FinishLogin failed for user %s: %v", sessionData.User.DisplayName, err)
 		return sendJSONError(c, fiber.StatusBadRequest, "Login verification failed", err)
 	}
 
-	// 7. Update sign count in database
-	err = updateSignCount(email, result.NewSignCount)
-	if err != nil {
-		log.Printf("Warning: Failed to update sign count: %v", err)
-	}
+	// The login-state callback already persisted the new sign count.
 	log.Printf("Login successful for %s (%s)! New Sign Count: %d, User Verified: %t",
 		sessionData.User.DisplayName, email, result.NewSignCount, result.UserVerified)
 
-	// 8. Clear the challenge
-	err = deleteChallenge(payload.GetChallenge())
-	if err != nil {
-		log.Printf("Warning: Failed to delete challenge: %v", err)
-	}
-	log.Printf("Removed active login challenge for %s", email)
+	// The callback passed to FinishLogin already consumed the challenge.
+	log.Printf("Consumed active login challenge for %s", email)
 
 	// 9. Respond to client
 	return c.JSON(fiber.Map{

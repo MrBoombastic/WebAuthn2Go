@@ -27,9 +27,19 @@ const minimalDataLen = 37 // Minimal: RPIDHash + flags + sign count = magic numb
 
 // ParseAuthenticatorData returns the parsed data structure or an error
 func (w *WebAuthn) ParseAuthenticatorData(authDataBytes []byte) (*ParsedAuthData, error) {
+	if w == nil {
+		return nil, ErrNilInstance
+	}
+	if w.Config == nil {
+		return nil, ErrNilConfig
+	}
+
 	authDataLength := len(authDataBytes)
 	if authDataLength < minimalDataLen { // Minimum length for rpIdHash, flags, signCount
 		return nil, ErrAuthDataTooShort
+	}
+	if authDataLength > MaxAuthenticatorDataSize {
+		return nil, fmt.Errorf("%w: authenticator data", ErrInputTooLarge)
 	}
 
 	if w.Config.Debug {
@@ -40,6 +50,9 @@ func (w *WebAuthn) ParseAuthenticatorData(authDataBytes []byte) (*ParsedAuthData
 		RPIDHash:  authDataBytes[0:32],
 		Flags:     authDataBytes[32],
 		SignCount: binary.BigEndian.Uint32(authDataBytes[33:minimalDataLen]),
+	}
+	if parsed.Flags&0x22 != 0 || (parsed.Flags&0x10 != 0 && parsed.Flags&0x08 == 0) {
+		return nil, ErrInvalidAuthenticatorFlags
 	}
 
 	remainingData := authDataLength - minimalDataLen // Attested Credential Data + Extension Data, later only ED if present
@@ -66,6 +79,9 @@ func (w *WebAuthn) ParseAuthenticatorData(authDataBytes []byte) (*ParsedAuthData
 
 		credIDLenBytes := authDataBytes[AToffset : AToffset+2]
 		credIDLen := int(binary.BigEndian.Uint16(credIDLenBytes))
+		if credIDLen > MaxCredentialIDSize {
+			return nil, fmt.Errorf("%w: got %d bytes", ErrCredentialIDTooLarge, credIDLen)
+		}
 		AToffset += 2 //always
 
 		// Check length for Credential ID
@@ -89,6 +105,9 @@ func (w *WebAuthn) ParseAuthenticatorData(authDataBytes []byte) (*ParsedAuthData
 
 		// Now we have everything
 		remainingData = remainingData - len(credentialKeyBytes) - credIDLen - 16 - 2
+		if remainingData < 0 {
+			return nil, ErrInvalidAuthenticatorData
+		}
 
 		if len(credentialKeyBytes) > 0 {
 			_, err := webauthncose.ParsePublicKey(credentialKeyBytes)
@@ -105,10 +124,13 @@ func (w *WebAuthn) ParseAuthenticatorData(authDataBytes []byte) (*ParsedAuthData
 	if w.Config.Debug {
 		log.Printf("remaining data: %d", remainingData)
 	}
+	if parsed.Flags&0x80 == 0 && remainingData != 0 {
+		return nil, ErrInvalidAuthenticatorData
+	}
 
 	// Check if Extension data is present (ED flag, bit 7)
 	if parsed.Flags&0x80 != 0 {
-		if remainingData == 0 {
+		if remainingData <= 0 {
 			// ED flag is set, but no data remains after parsing previous parts.
 			return nil, ErrEDFlagButNoData
 		}

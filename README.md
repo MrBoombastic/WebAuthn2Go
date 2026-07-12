@@ -53,7 +53,7 @@ Used sources:
 - https://www.w3.org/TR/webauthn/ - THE specification
 
 > [!WARNING]
-> This library supports only Go 1.24 and above.
+> This library requires Go 1.25 or newer.
 
 ## Example
 
@@ -102,12 +102,32 @@ Please refer to the [example](./example) folder for a complete example (with SQL
 The key methods are BeginRegistration, FinishRegistration, BeginLogin, and FinishLogin. You will have to provide
 required data and save returned data manually by yourself.
 
+The finish methods require the challenge previously returned by the matching begin method and retrieved from trusted
+server-side ceremony state. `FinishRegistration` requires a `ChallengeConsumer` that atomically consumes the exact,
+unexpired registration challenge. `FinishLogin` requires a `LoginStateConsumer` that atomically consumes the exact,
+unexpired authentication challenge and compare-and-swaps the signature counter:
+`FinishRegistration(registrationData, storedChallenge, consumeChallenge)` and
+`FinishLogin(loginData, storedChallenge, commitLoginState)`.
+
+`LoginData.StoredCredential` must contain the credential ID, public key, signature counter, and owning user handle
+loaded
+from one trusted database record. The verifier rejects a response credential ID or user handle that does not match it.
+
+> [!IMPORTANT]
+> This is a breaking API requirement: completion calls without trusted ceremony state and the appropriate atomic
+> consumer are deliberately rejected.
+
 ### Key Caller Responsibilities:
 
 * **User Management:** Maintain your user database.
-* **Credential Storage:** Securely store the `CredentialID`, `PublicKey`, `AAGUID`, and `SignCount` associated with each
-  user after successful registration.
-* **Challenge Storage:** Securely store the challenge used for registration and authentication.
+* **Credential Storage:** Securely store the `CredentialID`, `PublicKey`, `SignCount`, and owning user handle in one
+  credential record after successful registration. Load that record into `LoginData.StoredCredential`.
+* **Challenge Storage and Consumption:** Securely store each challenge in trusted, server-side ceremony state, bind it
+  to
+  the user/session and intended ceremony, give it server-enforced expiry, then pass it to `FinishRegistration` or
+  `FinishLogin`. Consumers must reject expired, reused, or wrong-ceremony challenges.
+* **Atomic Login State:** The `LoginStateConsumer` must consume the authentication challenge and compare-and-swap the
+  signature counter in one transaction. A counter conflict must roll back challenge consumption.
 
 ## AAGUID Lookup subpackage
 
@@ -141,12 +161,16 @@ popular libraries is a safer choice.
 
 ## Security Considerations
 
-* **Challenge Management:** Ensure challenges are unique per operation, securely stored server-side (e.g., in
-  authenticated sessions), and used only once.
-* **Credential Storage:** Store public keys and especially sign counts securely. Compromise of the sign count storage
-  negates replay protection.
-* **Origin/RP ID Configuration:** Incorrect `RPID` or `RPOrigins` configuration will break functionality and is a
-  security boundary.
+* **Challenge Management:** Finish methods require the expected server-side challenge and reject mismatches. Typed
+  consumers run only after protocol validation and must enforce ceremony type, expiry, and one-time use.
+* **Credential Binding:** Authentication verifies the response credential ID and optional user handle against one
+  trusted
+  `StoredCredential`; discoverable flows must set `RequireUserHandle`.
+* **Credential Storage:** Store public keys and sign counts securely. Authentication succeeds only after the
+  `LoginStateConsumer` atomically advances the matching credential's counter together with challenge consumption.
+* **Origin/RP ID Configuration:** `RPOrigins` must be exact HTTPS origins with no path, query, fragment, or user info
+  (`http://localhost` is the sole HTTP exception). `RPID` must be a valid registrable domain (or localhost/IP) that
+  matches every configured origin.
 * **Attestation Verification:** This library currently **does not** perform cryptographic verification of attestation
   statements for `indirect` or `packed` formats.
   It only parses the authenticator data.

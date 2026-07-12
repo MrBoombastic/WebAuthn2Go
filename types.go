@@ -6,6 +6,20 @@ const (
 	algRS256 int64 = -257 // RSASSA-PKCS1-v1_5 w/ SHA-256
 )
 
+// Limits on decoded, untrusted WebAuthn inputs. They are deliberately generous
+// for normal WebAuthn payloads while preventing unbounded allocations.
+const (
+	MaxChallengeSize           = 64
+	MinChallengeSize           = 16
+	MaxClientDataJSONSize      = 64 * 1024
+	MaxAuthenticatorDataSize   = 128 * 1024
+	MaxAttestationObjectSize   = 1024 * 1024
+	MaxSignatureSize           = 16 * 1024
+	MaxCredentialPublicKeySize = 16 * 1024
+	MaxCredentialIDSize        = 1023
+	MaxUserHandleSize          = 64
+)
+
 // AttestationPreference defines the level of attestation requested.
 type AttestationPreference string
 
@@ -62,11 +76,36 @@ type WebAuthn struct {
 	parsedRPOrigins []parsedOriginData // Pre-parsed origins for efficient checking
 }
 
+// CeremonyType identifies the WebAuthn operation a challenge was issued for.
+// Persist it with the challenge so a login challenge cannot complete a
+// registration ceremony, or vice versa.
+type CeremonyType string
+
+const (
+	CeremonyRegistration   CeremonyType = "webauthn.create"
+	CeremonyAuthentication CeremonyType = "webauthn.get"
+)
+
+func (ct CeremonyType) IsValid() bool {
+	return ct == CeremonyRegistration || ct == CeremonyAuthentication
+}
+
+// ChallengeConsumer atomically consumes the exact challenge for the specified
+// ceremony. It must reject challenges that are expired, already consumed, or
+// were issued for another ceremony.
+type ChallengeConsumer func(challenge string, ceremony CeremonyType) error
+
+// LoginStateConsumer atomically consumes an authentication challenge and
+// compare-and-swaps the stored signature counter. It must commit both changes
+// together or neither of them.
+type LoginStateConsumer func(challenge string, ceremony CeremonyType, credentialID string, previousSignCount, newSignCount uint32) error
+
 // parsedOriginData holds pre-parsed and normalized components of an allowed origin.
 // Internal struct to avoid exposing parsing details.
 type parsedOriginData struct {
-	scheme string
-	host   string
+	scheme   string
+	host     string
+	hostname string
 }
 
 // RegistrationData holds the inputs for completing a registration ceremony.
@@ -89,8 +128,17 @@ type RegistrationResult struct {
 type LoginResult struct {
 	NewSignCount uint32 `json:"newSignCount"`
 	UserVerified bool   `json:"userVerified"`
-	CredentialID string `json:"credentialID"`
-	UserHandle   string `json:"userHandle"`
+	CredentialID string `json:"credentialID"` // Trusted StoredCredential ID.
+	UserHandle   string `json:"userHandle"`   // Trusted StoredCredential user handle, base64url encoded.
+}
+
+// StoredCredential is a trusted credential record loaded server-side. ID,
+// PublicKey, SignCount, and UserHandle must all come from the same record.
+type StoredCredential struct {
+	ID         string
+	PublicKey  []byte
+	SignCount  uint32
+	UserHandle []byte
 }
 
 // ValidationOutput holds results from the internal validateAssertion method.
@@ -157,12 +205,15 @@ type ClientData struct {
 	CrossOrigin bool   `json:"crossOrigin"`
 }
 
+// LoginData combines the untrusted assertion response with one trusted stored
+// credential. RequireUserHandle must be true for usernameless/discoverable
+// authentication ceremonies.
 type LoginData struct {
-	ClientDataJSON  string `json:"clientDataJSON"`
-	AuthData        string `json:"authData"`
-	Signature       string `json:"signature"`
-	StoredSignCount uint32 `json:"storedSignCount"`
-	PublicKey       []byte `json:"publicKey"`
-	UserHandle      string `json:"userHandle"`
-	CredentialID    string `json:"credentialID"`
+	ClientDataJSON    string           `json:"clientDataJSON"`
+	AuthData          string           `json:"authData"`
+	Signature         string           `json:"signature"`
+	UserHandle        string           `json:"userHandle"`
+	CredentialID      string           `json:"credentialID"`
+	StoredCredential  StoredCredential `json:"-"`
+	RequireUserHandle bool             `json:"-"`
 }

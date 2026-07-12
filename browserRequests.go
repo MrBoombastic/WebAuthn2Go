@@ -3,8 +3,6 @@ package webauthn
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/MrBoombastic/WebAuthn2Go/utils"
 )
 
 type PublicKeyCredential struct {
@@ -18,7 +16,7 @@ func (pkc *PublicKeyCredential) Parse(data []byte) (err error) {
 	if err := json.Unmarshal(data, pkc); err != nil {
 		return fmt.Errorf("%w: %w", ErrFailedUnmarshalPublicKeyCredential, err)
 	}
-	b, err := utils.DecodeBase64URL(pkc.ClientDataJSON)
+	b, err := decodeBase64URL(pkc.ClientDataJSON, MaxClientDataJSONSize, "client data JSON")
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrFailedDecodeClientData, err)
 	}
@@ -47,7 +45,7 @@ func (p *PublicKeyCredentialAssertion) Parse(data []byte) (err error) {
 	if err := json.Unmarshal(data, p); err != nil {
 		return fmt.Errorf("%w: %w", ErrFailedUnmarshalPublicKeyCredentialAssertion, err)
 	}
-	b, err := utils.DecodeBase64URL(p.ClientDataJSON)
+	b, err := decodeBase64URL(p.ClientDataJSON, MaxClientDataJSONSize, "client data JSON")
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrFailedDecodeClientData, err)
 	}

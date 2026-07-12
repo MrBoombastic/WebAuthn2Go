@@ -1,7 +1,6 @@
 package webauthn
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/MrBoombastic/WebAuthn2Go/utils"
@@ -11,7 +10,10 @@ import (
 // Returns options (with base64url challenge) or an error.
 func (w *WebAuthn) BeginLogin(allowedCredentialIDs []string) (*PublicKeyCredentialRequestOptions, error) {
 	if w == nil {
-		return nil, errors.New("WebAuthn instance is nil")
+		return nil, ErrNilInstance
+	}
+	if w.Config == nil {
+		return nil, ErrNilConfig
 	}
 	challenge, err := utils.GenerateChallenge()
 	if err != nil {
@@ -41,11 +43,20 @@ func (w *WebAuthn) BeginLogin(allowedCredentialIDs []string) (*PublicKeyCredenti
 }
 
 // FinishLogin completes the WebAuthn login process.
-func (w *WebAuthn) FinishLogin(data *LoginData) (*LoginResult, error) {
+// expectedChallenge must be loaded from a trusted, server-side ceremony state.
+// commitState must atomically consume that authentication challenge and
+// compare-and-swap the stored signature counter.
+func (w *WebAuthn) FinishLogin(data *LoginData, expectedChallenge string, commitState LoginStateConsumer) (*LoginResult, error) {
 	if w == nil {
-		return nil, errors.New("WebAuthn instance is nil")
+		return nil, ErrNilInstance
 	}
-	res, err := w.ValidateLoginData(data)
+	if w.Config == nil {
+		return nil, ErrNilConfig
+	}
+	if data == nil {
+		return nil, ErrNilLoginData
+	}
+	res, err := w.ValidateLoginData(data, expectedChallenge, commitState)
 	if err != nil {
 		return nil, fmt.Errorf("assertion validation failed: %w", err)
 	}
@@ -53,7 +64,7 @@ func (w *WebAuthn) FinishLogin(data *LoginData) (*LoginResult, error) {
 	return &LoginResult{
 		NewSignCount: res.NewSignCount,
 		UserVerified: res.UserVerified,
-		CredentialID: data.CredentialID,
-		UserHandle:   data.UserHandle,
+		CredentialID: data.StoredCredential.ID,
+		UserHandle:   utils.EncodeBase64URL(data.StoredCredential.UserHandle),
 	}, nil
 }
