@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/MrBoombastic/WebAuthn2Go v0.4.2
-	github.com/gofiber/fiber/v2 v2.52.14
+	github.com/gofiber/fiber/v2 v2.52.15
 	github.com/google/uuid v1.6.0
 	github.com/ncruces/go-sqlite3 v0.35.1
 )
