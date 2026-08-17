@@ -55,12 +55,12 @@ func validateChallenge(expected, received string) error {
 	return nil
 }
 
-func consumeChallenge(consumer ChallengeConsumer, challenge string, ceremony CeremonyType) error {
+func commitRegistrationState(consumer RegistrationStateConsumer, challenge string, credential RegistrationResult) error {
 	if consumer == nil {
-		return ErrChallengeConsumptionRequired
+		return ErrRegistrationStateConsumerRequired
 	}
-	if err := consumer(challenge, ceremony); err != nil {
-		return fmt.Errorf("%w: %w", ErrChallengeConsumptionFailed, err)
+	if err := consumer(challenge, CeremonyRegistration, credential); err != nil {
+		return fmt.Errorf("%w: %w", ErrRegistrationStateCommitFailed, err)
 	}
 	return nil
 }

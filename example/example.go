@@ -197,26 +197,20 @@ func finishRegistration(c *fiber.Ctx) error {
 		AttestationObject: payload.AttestationObject,
 	}
 
-	// 5. Validate against the trusted challenge and atomically consume it only
-	// after the library has accepted the registration response.
-	result, err := w.FinishRegistration(registrationData, challengeRecord.Challenge, func(challenge string, ceremony webauthn.CeremonyType) error {
-		return consumeStoredChallenge(challenge, email, ceremony)
+	// 5. Validate against the trusted challenge, then atomically consume it and
+	// persist the verified credential in one database transaction.
+	result, err := w.FinishRegistration(registrationData, challengeRecord.Challenge, func(challenge string, ceremony webauthn.CeremonyType, credential webauthn.RegistrationResult) error {
+		return commitRegistrationState(challenge, email, ceremony, credential)
 	})
 	if err != nil {
 		log.Printf("FinishRegistration failed for email %s: %v", email, err)
 		return sendJSONError(c, fiber.StatusBadRequest, "Registration verification failed", err)
 	}
 
-	// 6. Store the credential details in the database
-	err = updateUserCredentials(email, result.CredentialID, result.PublicKey, result.SignCount)
-	if err != nil {
-		return sendJSONError(c, fiber.StatusInternalServerError, "Failed to store credentials", err)
-	}
-
 	log.Printf("Registration successful for %s (%s)! Stored CredID: %s, AAGUID: %s, Name: %s", sessionData.User.DisplayName, email, payload.ID, result.AAGUID, result.AuthenticatorName)
 
-	// The callback passed to FinishRegistration already consumed the challenge.
-	log.Printf("Consumed active challenge for %s", email)
+	// The callback passed to FinishRegistration committed both state changes.
+	log.Printf("Stored credential and consumed active challenge for %s", email)
 
 	// 8. Reply to the client
 	return c.JSON(fiber.Map{

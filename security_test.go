@@ -43,6 +43,31 @@ func TestFinishRegistrationRejectsChallengeMismatch(t *testing.T) {
 	}
 }
 
+func TestFinishRegistrationCommitsVerifiedCredentialAtomically(t *testing.T) {
+	w := newTestWebAuthn(t, UVPreferred)
+	challenge := testChallenge(3)
+	data, expectedCredentialID := validRegistrationData(t, challenge)
+
+	if _, err := w.FinishRegistration(data, challenge, nil); !errors.Is(err, ErrRegistrationStateConsumerRequired) {
+		t.Fatalf("expected ErrRegistrationStateConsumerRequired, got %v", err)
+	}
+
+	committed := false
+	result, err := w.FinishRegistration(data, challenge, func(gotChallenge string, ceremony CeremonyType, credential RegistrationResult) error {
+		if gotChallenge != challenge || ceremony != CeremonyRegistration || credential.CredentialID != expectedCredentialID || len(credential.PublicKey) == 0 {
+			return errors.New("unexpected verified registration state")
+		}
+		committed = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("FinishRegistration() error = %v", err)
+	}
+	if !committed || result.CredentialID != expectedCredentialID {
+		t.Fatal("verified credential was not committed")
+	}
+}
+
 func TestValidateLoginDataEnforcesRequiredUserVerification(t *testing.T) {
 	w := newTestWebAuthn(t, UVRequired)
 	challenge := testChallenge(1)
@@ -270,29 +295,30 @@ func TestValidateCredentialPublicKeyAcceptsStrongRS256(t *testing.T) {
 	}
 }
 
-func TestConsumeChallengeRequiresSuccessfulAtomicConsumer(t *testing.T) {
+func TestCommitRegistrationStateRequiresSuccessfulAtomicConsumer(t *testing.T) {
 	challenge := testChallenge(1)
-	if err := consumeChallenge(nil, challenge, CeremonyRegistration); !errors.Is(err, ErrChallengeConsumptionRequired) {
-		t.Fatalf("expected ErrChallengeConsumptionRequired, got %v", err)
+	credential := RegistrationResult{CredentialID: testChallenge(2), PublicKey: []byte("public-key"), SignCount: 7}
+	if err := commitRegistrationState(nil, challenge, credential); !errors.Is(err, ErrRegistrationStateConsumerRequired) {
+		t.Fatalf("expected ErrRegistrationStateConsumerRequired, got %v", err)
 	}
 
-	consumeErr := errors.New("already used")
-	if err := consumeChallenge(func(string, CeremonyType) error { return consumeErr }, challenge, CeremonyRegistration); !errors.Is(err, ErrChallengeConsumptionFailed) {
-		t.Fatalf("expected ErrChallengeConsumptionFailed, got %v", err)
+	commitErr := errors.New("transaction failed")
+	if err := commitRegistrationState(func(string, CeremonyType, RegistrationResult) error { return commitErr }, challenge, credential); !errors.Is(err, ErrRegistrationStateCommitFailed) {
+		t.Fatalf("expected ErrRegistrationStateCommitFailed, got %v", err)
 	}
 
-	consumed := false
-	if err := consumeChallenge(func(gotChallenge string, ceremony CeremonyType) error {
-		if gotChallenge != challenge || ceremony != CeremonyRegistration {
+	committed := false
+	if err := commitRegistrationState(func(gotChallenge string, ceremony CeremonyType, gotCredential RegistrationResult) error {
+		if gotChallenge != challenge || ceremony != CeremonyRegistration || gotCredential.CredentialID != credential.CredentialID || gotCredential.SignCount != credential.SignCount {
 			return errors.New("unexpected ceremony state")
 		}
-		consumed = true
+		committed = true
 		return nil
-	}, challenge, CeremonyRegistration); err != nil {
-		t.Fatalf("consumeChallenge() error = %v", err)
+	}, challenge, credential); err != nil {
+		t.Fatalf("commitRegistrationState() error = %v", err)
 	}
-	if !consumed {
-		t.Fatal("expected challenge consumer to run")
+	if !committed {
+		t.Fatal("expected registration state consumer to run")
 	}
 }
 
@@ -336,6 +362,49 @@ func testAuthenticatorData(flags byte) string {
 	copy(b, rpIDHash[:])
 	b[32] = flags
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func validRegistrationData(t *testing.T, challenge string) (RegistrationData, string) {
+	t.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	publicKey, err := webauthncbor.Marshal(webauthncose.EC2PublicKeyData{
+		PublicKeyData: webauthncose.PublicKeyData{
+			KeyType:   int64(webauthncose.EllipticKey),
+			Algorithm: algES256,
+		},
+		Curve:  int64(webauthncose.P256),
+		XCoord: privateKey.PublicKey.X.FillBytes(make([]byte, 32)),
+		YCoord: privateKey.PublicKey.Y.FillBytes(make([]byte, 32)),
+	})
+	if err != nil {
+		t.Fatalf("Marshal(public key) error = %v", err)
+	}
+
+	credentialID := bytes.Repeat([]byte{0xa5}, 32)
+	rpIDHash := sha256.Sum256([]byte("example.com"))
+	authData := append([]byte{}, rpIDHash[:]...)
+	authData = append(authData, 0x41, 0, 0, 0, 0) // UP + AT, sign count 0.
+	authData = append(authData, make([]byte, 16)...)
+	authData = append(authData, 0, byte(len(credentialID)))
+	authData = append(authData, credentialID...)
+	authData = append(authData, publicKey...)
+
+	attestation, err := webauthncbor.Marshal(attestationObject{
+		AuthData: authData,
+		Fmt:      string(AttestationNone),
+		AttStmt:  map[string]interface{}{},
+	})
+	if err != nil {
+		t.Fatalf("Marshal(attestation object) error = %v", err)
+	}
+
+	return RegistrationData{
+		ClientDataJSON:    testClientData(t, "webauthn.create", challenge, "https://example.com"),
+		AttestationObject: base64.RawURLEncoding.EncodeToString(attestation),
+	}, base64.RawURLEncoding.EncodeToString(credentialID)
 }
 
 func signedLoginData(t *testing.T, challenge string, flags byte, signCount byte) *LoginData {

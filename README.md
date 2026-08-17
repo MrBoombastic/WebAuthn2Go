@@ -1,6 +1,6 @@
-# WebAuthn2Go - Go WebAuthn Server Library
+# WebAuthn2Go – Go WebAuthn Server Library
 
-![docs/hero.png](docs/hero.png)
+![docs/hero.jpg](docs/hero.jpg)
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/MrBoombastic/WebAuthn2Go.svg)](https://pkg.go.dev/github.com/MrBoombastic/WebAuthn2Go)
 
@@ -19,7 +19,7 @@ authentication.
 * **Sign Count Protection:** Checks for increasing sign counts to help prevent replay attacks (requires secure storage
   by the caller).
 * **AAGUID Lookup:** Provides a utility to look up authenticator names based on AAGUID.
-* **Extensions Support:** Basic support for WebAuthn extensions.
+* **Extension Support:** Basic support for WebAuthn extensions.
 * **Configuration:** Simple configuration for Relying Party details.
 
 ## Why this library?
@@ -30,7 +30,7 @@ in https://github.com/go-webauthn/webauthn. There are no other alternatives, exc
 the https://github.com/egregors/passkey, which is a wrapper around the first one, which additionally can set cookies for
 you.
 
-If you want more flexibility or control, and you don't need fancy features - this is the library for You.
+If you want more flexibility or control, and you don't need fancy features, this is the library for You.
 
 ## Why NOT this library?
 
@@ -40,7 +40,7 @@ for example. This library is also in early development, so may be not suitable f
 The library is also not popular. It's possible that this repo has more or less zero stars and has never been reviewed or
 used by the third party. So, if you are looking for a battle-tested library, this is not the one.
 
-One more thing - **the code is written with the partial help of AI**. Although the author tried his best to understand
+One more thing – **the code is written with the partial help of AI**. Although the author tried his best to understand
 WebAuthn
 specification and read various sources, the code may be far from perfect or even insecure. Every line of code has been
 read and verified by myself. It wasn't just *do webauthn lib wololo* in ChatGPT. But still, please use it at your own
@@ -48,9 +48,9 @@ risk.
 
 Used sources:
 
-- https://www.corbado.com/glossary/attestation and other glossary entries - readable, but sometimes too simple
-- https://webauthn.guide/ - general overview
-- https://www.w3.org/TR/webauthn/ - THE specification
+- https://www.corbado.com/glossary/attestation and other glossary entries – readable, but sometimes too simple
+- https://webauthn.guide/ – general overview
+- https://www.w3.org/TR/webauthn/ – THE specification
 
 > [!WARNING]
 > This library requires Go 1.25 or newer.
@@ -99,14 +99,16 @@ The library provides functions to handle the two main WebAuthn ceremonies: Regis
 `Get`).
 
 Please refer to the [example](./example) folder for a complete example (with SQLite3 support) of how to use the library.
-The key methods are BeginRegistration, FinishRegistration, BeginLogin, and FinishLogin. You will have to provide
-required data and save returned data manually by yourself.
+The key methods are BeginRegistration, FinishRegistration, BeginLogin, and FinishLogin. You must provide the trusted
+ceremony state and transactional persistence callbacks used by the finish methods.
 
-The finish methods require the challenge previously returned by the matching begin method and retrieved from trusted
-server-side ceremony state. `FinishRegistration` requires a `ChallengeConsumer` that atomically consumes the exact,
-unexpired registration challenge. `FinishLogin` requires a `LoginStateConsumer` that atomically consumes the exact,
-unexpired authentication challenge and compare-and-swaps the signature counter:
-`FinishRegistration(registrationData, storedChallenge, consumeChallenge)` and
+The finish methods require the challenge previously returned by the matching beginning method and retrieved from the
+trusted server-side ceremony state. `FinishRegistration` requires a `RegistrationStateConsumer` that atomically consumes
+the exact, unexpired registration challenge and persists the verified credential while rejecting duplicate credential
+IDs.
+`FinishLogin` requires a `LoginStateConsumer` that atomically consumes the exact, unexpired authentication challenge and
+compare-and-swaps the signature counter:
+`FinishRegistration(registrationData, storedChallenge, commitRegistrationState)` and
 `FinishLogin(loginData, storedChallenge, commitLoginState)`.
 
 `LoginData.StoredCredential` must contain the credential ID, public key, signature counter, and owning user handle
@@ -114,18 +116,22 @@ loaded
 from one trusted database record. The verifier rejects a response credential ID or user handle that does not match it.
 
 > [!IMPORTANT]
-> This is a breaking API requirement: completion calls without trusted ceremony state and the appropriate atomic
+> This is a breaking API requirement: completion calls without a trusted ceremony state and the appropriate atomic
 > consumer are deliberately rejected.
 
 ### Key Caller Responsibilities:
 
 * **User Management:** Maintain your user database.
-* **Credential Storage:** Securely store the `CredentialID`, `PublicKey`, `SignCount`, and owning user handle in one
-  credential record after successful registration. Load that record into `LoginData.StoredCredential`.
-* **Challenge Storage and Consumption:** Securely store each challenge in trusted, server-side ceremony state, bind it
+* **Credential Storage:** The `RegistrationStateConsumer` must securely store the verified `CredentialID`, `PublicKey`,
+  and `SignCount` for the owning user while consuming the challenge in the same transaction. Load that record together
+  with its owning user handle into `LoginData.StoredCredential` for authentication.
+* **Challenge Storage and Consumption:** Securely store each challenge in a trusted, server-side ceremony state, bind it
   to
   the user/session and intended ceremony, give it server-enforced expiry, then pass it to `FinishRegistration` or
   `FinishLogin`. Consumers must reject expired, reused, or wrong-ceremony challenges.
+* **Atomic Registration State:** The `RegistrationStateConsumer` must persist the verified credential and consume its
+  registration challenge in one transaction. A duplicate credential ID or write failure must roll back challenge
+  consumption.
 * **Atomic Login State:** The `LoginStateConsumer` must consume the authentication challenge and compare-and-swap the
   signature counter in one transaction. A counter conflict must roll back challenge consumption.
 
@@ -166,8 +172,9 @@ popular libraries is a safer choice.
 * **Credential Binding:** Authentication verifies the response credential ID and optional user handle against one
   trusted
   `StoredCredential`; discoverable flows must set `RequireUserHandle`.
-* **Credential Storage:** Store public keys and sign counts securely. Authentication succeeds only after the
-  `LoginStateConsumer` atomically advances the matching credential's counter together with challenge consumption.
+* **Credential Storage:** Registration succeeds only after the `RegistrationStateConsumer` atomically stores the
+  credential together with challenge consumption. Authentication succeeds only after the `LoginStateConsumer`
+  atomically advances the matching credential's counter together with challenge consumption.
 * **Origin/RP ID Configuration:** `RPOrigins` must be exact HTTPS origins with no path, query, fragment, or user info
   (`http://localhost` is the sole HTTP exception). `RPID` must be a valid registrable domain (or localhost/IP) that
   matches every configured origin.
@@ -184,4 +191,4 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License – see the LICENSE file for details.

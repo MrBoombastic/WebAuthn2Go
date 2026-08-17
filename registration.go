@@ -50,9 +50,10 @@ func (w *WebAuthn) BeginRegistration(user UserEntity) (navigator *BeginRegistrat
 
 // FinishRegistration completes the WebAuthn registration process.
 // expectedChallenge must be loaded from a trusted, server-side ceremony state.
-// consume must atomically reject expiry, reuse, and any ceremony type other
-// than CeremonyRegistration before deleting the challenge.
-func (w *WebAuthn) FinishRegistration(data RegistrationData, expectedChallenge string, consume ChallengeConsumer) (*RegistrationResult, error) {
+// commitState must atomically reject expiry, reuse, wrong ceremony type, and
+// duplicate credential IDs, then persist the verified credential while
+// consuming the challenge in the same transaction.
+func (w *WebAuthn) FinishRegistration(data RegistrationData, expectedChallenge string, commitState RegistrationStateConsumer) (*RegistrationResult, error) {
 	// FLOW 1: pass data
 	if w == nil {
 		return nil, ErrNilInstance
@@ -142,16 +143,17 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData, expectedChallenge s
 	// Convert CredentialID to base64url string for storage/transport
 	credIDStr := base64.RawURLEncoding.EncodeToString(authData.CredentialID)
 	name := aaguid.LookupAuthenticatorUUID(authData.AAGUID)
-	if err := consumeChallenge(consume, expectedChallenge, CeremonyRegistration); err != nil {
-		return nil, err
-	}
-
-	return &RegistrationResult{
+	result := &RegistrationResult{
 		CredentialID:      credIDStr, // Return base64url encoded ID
 		PublicKey:         authData.CredentialPubKeyBytes,
 		AAGUID:            authData.AAGUID.String(),
 		AuthenticatorName: name,                // Use the looked-up name (or default)
 		SignCount:         authData.SignCount,  // Set the initial sign count from authData
 		Extensions:        authData.Extensions, // Set ED if present
-	}, nil
+	}
+	if err := commitRegistrationState(commitState, expectedChallenge, *result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

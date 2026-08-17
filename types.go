@@ -90,10 +90,11 @@ func (ct CeremonyType) IsValid() bool {
 	return ct == CeremonyRegistration || ct == CeremonyAuthentication
 }
 
-// ChallengeConsumer atomically consumes the exact challenge for the specified
-// ceremony. It must reject challenges that are expired, already consumed, or
-// were issued for another ceremony.
-type ChallengeConsumer func(challenge string, ceremony CeremonyType) error
+// RegistrationStateConsumer atomically consumes a registration challenge and
+// persists the verified credential. It must reject expired, reused, or
+// wrong-ceremony challenges and duplicate credential IDs. Both state changes
+// must commit together or neither of them may commit.
+type RegistrationStateConsumer func(challenge string, ceremony CeremonyType, credential RegistrationResult) error
 
 // LoginStateConsumer atomically consumes an authentication challenge and
 // compare-and-swaps the stored signature counter. It must commit both changes

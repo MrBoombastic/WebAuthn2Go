@@ -93,24 +93,6 @@ func getUser(email string) (*UserSessionData, error) {
 	return &userData, nil
 }
 
-func updateUserCredentials(email string, credID string, publicKeyBytes []byte, signCount uint32) error {
-	result, err := db.Exec(
-		"UPDATE users SET cred_id = ?, public_key = ?, sign_count = ? WHERE email = ? AND cred_id IS NULL AND public_key IS NULL",
-		credID, publicKeyBytes, signCount, email,
-	)
-	if err != nil {
-		return err
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if updated != 1 {
-		return errCredentialAlreadyRegistered
-	}
-	return nil
-}
-
 func saveChallenge(challenge, email string, ceremony webauthn.CeremonyType, expiresAt time.Time) error {
 	if !ceremony.IsValid() {
 		return fmt.Errorf("invalid ceremony type %q", ceremony)
@@ -151,7 +133,15 @@ func getStoredChallenge(challenge string, ceremony webauthn.CeremonyType) (store
 // consumeStoredChallenge deletes exactly one record. DELETE is atomic in
 // SQLite, so concurrent ceremony completions cannot both succeed.
 func consumeStoredChallenge(challenge, email string, ceremony webauthn.CeremonyType) error {
-	result, err := db.Exec(
+	return consumeChallenge(db, challenge, email, ceremony)
+}
+
+type sqlExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func consumeChallenge(executor sqlExecutor, challenge, email string, ceremony webauthn.CeremonyType) error {
+	result, err := executor.Exec(
 		"DELETE FROM ceremony_challenges WHERE challenge = ? AND email = ? AND ceremony = ? AND expires_at >= ?",
 		challenge, email, ceremony, time.Now().UnixMilli(),
 	)
@@ -168,50 +158,77 @@ func consumeStoredChallenge(challenge, email string, ceremony webauthn.CeremonyT
 	return nil
 }
 
-// commitLoginState consumes the authentication challenge and advances the
-// signature counter in one transaction. A stale counter rolls the challenge
-// deletion back so a valid concurrent response can be retried safely.
-func commitLoginState(challenge, email string, ceremony webauthn.CeremonyType, credentialID string, previousSignCount, newSignCount uint32) (err error) {
+func withTransaction(operation func(*sql.Tx) error) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.Exec(
-		"DELETE FROM ceremony_challenges WHERE challenge = ? AND email = ? AND ceremony = ? AND expires_at >= ?",
-		challenge, email, ceremony, time.Now().UnixMilli(),
-	)
-	if err != nil {
+	if err := operation(tx); err != nil {
 		return err
-	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if deleted != 1 {
-		return errChallengeNotFound
-	}
-
-	result, err = tx.Exec(
-		"UPDATE users SET sign_count = ? WHERE email = ? AND cred_id = ? AND sign_count = ?",
-		newSignCount, email, credentialID, previousSignCount,
-	)
-	if err != nil {
-		return err
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if updated != 1 {
-		return errSignCountConflict
 	}
 	return tx.Commit()
+}
+
+// commitRegistrationState consumes the registration challenge and stores the
+// verified credential in one transaction. Any credential conflict or database
+// error rolls the challenge deletion back.
+func commitRegistrationState(challenge, email string, ceremony webauthn.CeremonyType, credential webauthn.RegistrationResult) error {
+	if ceremony != webauthn.CeremonyRegistration {
+		return fmt.Errorf("invalid registration ceremony type %q", ceremony)
+	}
+
+	return withTransaction(func(tx *sql.Tx) error {
+		if err := consumeChallenge(tx, challenge, email, ceremony); err != nil {
+			return err
+		}
+
+		result, err := tx.Exec(
+			"UPDATE users SET cred_id = ?, public_key = ?, sign_count = ? WHERE email = ? AND cred_id IS NULL AND public_key IS NULL",
+			credential.CredentialID, credential.PublicKey, credential.SignCount, email,
+		)
+		if err != nil {
+			return err
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updated != 1 {
+			return errCredentialAlreadyRegistered
+		}
+
+		return nil
+	})
+}
+
+// commitLoginState consumes the authentication challenge and advances the
+// signature counter in one transaction. A stale counter rolls the challenge
+// deletion back so a valid concurrent response can be retried safely.
+func commitLoginState(challenge, email string, ceremony webauthn.CeremonyType, credentialID string, previousSignCount, newSignCount uint32) error {
+	return withTransaction(func(tx *sql.Tx) error {
+		if err := consumeChallenge(tx, challenge, email, ceremony); err != nil {
+			return err
+		}
+
+		result, err := tx.Exec(
+			"UPDATE users SET sign_count = ? WHERE email = ? AND cred_id = ? AND sign_count = ?",
+			newSignCount, email, credentialID, previousSignCount,
+		)
+		if err != nil {
+			return err
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updated != 1 {
+			return errSignCountConflict
+		}
+
+		return nil
+	})
 }
 
 func deleteChallenge(challenge, email string, ceremony webauthn.CeremonyType) error {

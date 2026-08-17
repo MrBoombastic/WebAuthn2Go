@@ -62,14 +62,66 @@ func TestExpiredChallengeIsRejected(t *testing.T) {
 	}
 }
 
+func TestCommitRegistrationStateIsAtomic(t *testing.T) {
+	withTestDB(t)
+	first := &UserSessionData{User: webauthn.UserEntity{ID: []byte("first-user"), Name: "first@example.com", DisplayName: "First"}}
+	if err := saveUser(first); err != nil {
+		t.Fatalf("saveUser(first) error = %v", err)
+	}
+	if err := saveChallenge("first-registration", first.User.Name, webauthn.CeremonyRegistration, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("saveChallenge(first) error = %v", err)
+	}
+	credential := webauthn.RegistrationResult{CredentialID: "credential", PublicKey: []byte("public-key"), SignCount: 3}
+	if err := commitRegistrationState("first-registration", first.User.Name, webauthn.CeremonyRegistration, credential); err != nil {
+		t.Fatalf("commitRegistrationState(first) error = %v", err)
+	}
+	if _, err := getStoredChallenge("first-registration", webauthn.CeremonyRegistration); !errors.Is(err, errChallengeNotFound) {
+		t.Fatalf("successful commit must consume challenge, got %v", err)
+	}
+	storedFirst, err := getUser(first.User.Name)
+	if err != nil {
+		t.Fatalf("getUser(first) error = %v", err)
+	}
+	if storedFirst.CredID != credential.CredentialID || string(storedFirst.PublicKey) != string(credential.PublicKey) || storedFirst.SignCount != credential.SignCount {
+		t.Fatalf("credential was not stored atomically: %#v", storedFirst)
+	}
+
+	second := &UserSessionData{User: webauthn.UserEntity{ID: []byte("second-user"), Name: "second@example.com", DisplayName: "Second"}}
+	if err := saveUser(second); err != nil {
+		t.Fatalf("saveUser(second) error = %v", err)
+	}
+	if err := saveChallenge("conflicting-registration", second.User.Name, webauthn.CeremonyRegistration, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("saveChallenge(conflict) error = %v", err)
+	}
+	if err := commitRegistrationState("conflicting-registration", second.User.Name, webauthn.CeremonyRegistration, credential); err == nil {
+		t.Fatal("expected duplicate credential commit to fail")
+	}
+	if _, err := getStoredChallenge("conflicting-registration", webauthn.CeremonyRegistration); err != nil {
+		t.Fatalf("failed credential write must roll challenge consumption back: %v", err)
+	}
+	storedSecond, err := getUser(second.User.Name)
+	if err != nil {
+		t.Fatalf("getUser(second) error = %v", err)
+	}
+	if storedSecond.CredID != "" || len(storedSecond.PublicKey) != 0 {
+		t.Fatalf("failed commit must not partially store credential: %#v", storedSecond)
+	}
+}
+
 func TestCommitLoginStateIsAtomicAndCompareAndSwapsCounter(t *testing.T) {
 	withTestDB(t)
 	user := &UserSessionData{User: webauthn.UserEntity{ID: []byte("user-id"), Name: "user@example.com", DisplayName: "User"}}
 	if err := saveUser(user); err != nil {
 		t.Fatalf("saveUser() error = %v", err)
 	}
-	if err := updateUserCredentials(user.User.Name, "credential", []byte("public-key"), 0); err != nil {
-		t.Fatalf("updateUserCredentials() error = %v", err)
+	if err := saveChallenge("registration-setup", user.User.Name, webauthn.CeremonyRegistration, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("saveChallenge(registration setup) error = %v", err)
+	}
+	if err := commitRegistrationState("registration-setup", user.User.Name, webauthn.CeremonyRegistration, webauthn.RegistrationResult{
+		CredentialID: "credential",
+		PublicKey:    []byte("public-key"),
+	}); err != nil {
+		t.Fatalf("commitRegistrationState(setup) error = %v", err)
 	}
 	if err := saveChallenge("counterless", user.User.Name, webauthn.CeremonyAuthentication, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("saveChallenge(counterless) error = %v", err)
