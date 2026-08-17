@@ -370,18 +370,7 @@ func validRegistrationData(t *testing.T, challenge string) (RegistrationData, st
 	if err != nil {
 		t.Fatalf("GenerateKey() error = %v", err)
 	}
-	publicKey, err := webauthncbor.Marshal(webauthncose.EC2PublicKeyData{
-		PublicKeyData: webauthncose.PublicKeyData{
-			KeyType:   int64(webauthncose.EllipticKey),
-			Algorithm: algES256,
-		},
-		Curve:  int64(webauthncose.P256),
-		XCoord: privateKey.PublicKey.X.FillBytes(make([]byte, 32)),
-		YCoord: privateKey.PublicKey.Y.FillBytes(make([]byte, 32)),
-	})
-	if err != nil {
-		t.Fatalf("Marshal(public key) error = %v", err)
-	}
+	publicKey := marshalTestP256PublicKey(t, &privateKey.PublicKey)
 
 	credentialID := bytes.Repeat([]byte{0xa5}, 32)
 	rpIDHash := sha256.Sum256([]byte("example.com"))
@@ -438,18 +427,7 @@ func signedLoginData(t *testing.T, challenge string, flags byte, signCount byte)
 		t.Fatalf("asn1.Marshal() error = %v", err)
 	}
 
-	publicKey, err := webauthncbor.Marshal(webauthncose.EC2PublicKeyData{
-		PublicKeyData: webauthncose.PublicKeyData{
-			KeyType:   int64(webauthncose.EllipticKey),
-			Algorithm: int64(webauthncose.AlgES256),
-		},
-		Curve:  int64(webauthncose.P256),
-		XCoord: privateKey.PublicKey.X.FillBytes(make([]byte, 32)),
-		YCoord: privateKey.PublicKey.Y.FillBytes(make([]byte, 32)),
-	})
-	if err != nil {
-		t.Fatalf("Marshal(public key) error = %v", err)
-	}
+	publicKey := marshalTestP256PublicKey(t, &privateKey.PublicKey)
 
 	return &LoginData{
 		ClientDataJSON: clientData,
@@ -464,6 +442,34 @@ func signedLoginData(t *testing.T, challenge string, flags byte, signCount byte)
 			UserHandle: []byte("test-user-handle"),
 		},
 	}
+}
+
+func marshalTestP256PublicKey(t *testing.T, publicKey *ecdsa.PublicKey) []byte {
+	t.Helper()
+
+	encoded, err := publicKey.Bytes()
+	if err != nil {
+		t.Fatalf("PublicKey.Bytes() error = %v", err)
+	}
+
+	const coordinateSize = 32
+	if len(encoded) != 1+2*coordinateSize || encoded[0] != 0x04 {
+		t.Fatalf("PublicKey.Bytes() returned an invalid P-256 point")
+	}
+
+	coseKey, err := webauthncbor.Marshal(webauthncose.EC2PublicKeyData{
+		PublicKeyData: webauthncose.PublicKeyData{
+			KeyType:   int64(webauthncose.EllipticKey),
+			Algorithm: algES256,
+		},
+		Curve:  int64(webauthncose.P256),
+		XCoord: encoded[1 : 1+coordinateSize],
+		YCoord: encoded[1+coordinateSize:],
+	})
+	if err != nil {
+		t.Fatalf("Marshal(public key) error = %v", err)
+	}
+	return coseKey
 }
 
 type testECDSASignature struct {
