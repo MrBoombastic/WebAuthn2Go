@@ -55,16 +55,30 @@ Used sources:
 > [!WARNING]
 > This library requires Go 1.25 or newer.
 
-## Example
-
-There is a simple example in the [example](./example) folder.
-It uses the `github.com/gofiber/fiber/v2` web framework, but you can use whatever you want.
-
 ## Installation
 
 ```bash
 go get github.com/MrBoombastic/WebAuthn2Go
 ```
+
+## Try the working demo first
+
+The easiest way to understand the library is to run the included example from a clone of this repository:
+
+```bash
+cd example
+go run .
+```
+
+Then open [http://localhost:8080](http://localhost:8080), enter any name and email address, and click **Register**. Your
+browser or security key will ask you to create a passkey. After that, click **Login** to authenticate with it.
+
+The demo uses Fiber and SQLite, but the WebAuthn library itself is not tied to either of them. Its complete server code
+is in [example/example.go](./example/example.go), the database code is in [example/db.go](./example/db.go), and the
+browser-side WebAuthn calls are in [example/static/script.js](./example/static/script.js).
+
+> [!WARNING]
+> The example is intended for local learning. It is not a production-ready account system.
 
 ## Configuration
 
@@ -72,19 +86,16 @@ Before using the library, you need to configure your Relying Party (RP) details 
 
 ```go
 w, err := webauthn.New(&webauthn.Config{
-    RPID:             "localhost",                       // Domain name only - must match the domain in your URL
-    RPDisplayName:    "WebAuthn2Go Example",             // Display name
-    RPOrigins:        []string{"https://yourdomain.com", "https://auth.yourdomain.com"}, // Allowed origins - with protocol and port
-    Timeout:          300_000,                           // Milliseconds, 5 minutes
-    UserVerification: webauthn.UVPreferred,              // User verification requirement
-    Attestation:      webauthn.AttestationIndirect,      // Attestation preference, Indirect gives us AAGUID
-    Debug:            true,                              // Enable debug logging
+    RPID:             "localhost",                    // Domain only, without http:// or a port.
+    RPDisplayName:    "My first passkey app",         // Name shown by the browser.
+    RPOrigins:        []string{"http://localhost:8080"}, // Exact URL used in the browser.
+    Timeout:          300_000,                        // Five minutes, in milliseconds.
+    UserVerification: webauthn.UVPreferred,           // Use PIN/biometrics when available.
+    Attestation:      webauthn.AttestationNone,       // Recommended when device provenance is not needed.
+    Debug:            true,
 })
-
-w, err := webauthn.New(rpConfig)
 if err != nil {
-  // Handle configuration error (e.g., missing RPID/Origins)
-  log.Fatalf("Failed to initialize WebAuthn: %v", err)
+	log.Fatalf("Failed to initialize WebAuthn: %v", err)
 }
 ```
 
@@ -95,14 +106,188 @@ if err != nil {
 
 ## Usage Overview
 
-The library provides functions to handle the two main WebAuthn ceremonies: Registration (`Create`) and Authentication (
-`Get`).
+### WebAuthn in plain English
+
+WebAuthn has two flows, called ceremonies:
+
+1. **Registration:** your server gives the browser a random, one-time challenge. The browser creates a passkey and
+   returns a public key. Your server verifies the response and stores that public key.
+2. **Login:** your server sends a new challenge. The authenticator signs it with a private key never sent to your
+   server. Your server checks the signature using the stored public key.
+
+The challenge prevents an old response from being replayed. It must be stored by the server, expire after a short time,
+and be usable only once. Do not trust a challenge, user ID, public key, or signature merely because the browser sent it.
+
+The four main methods map directly to those two flows:
+
+| Flow         | Send options to the browser | Verify the browser response |
+|--------------|-----------------------------|-----------------------------|
+| Registration | `BeginRegistration`         | `FinishRegistration`        |
+| Login        | `BeginLogin`                | `FinishLogin`               |
+
+Your HTTP framework only transports JSON. The important state—challenges, users, credentials, and signature counters—
+belongs in your server-side database.
+
+### Registration example
+
+Starting registration is simple. Create the browser options and save the generated challenge with the user it belongs
+to:
+
+```go
+user := webauthn.UserEntity{
+	ID:          []byte("stable-random-user-id"), // Use a stable opaque ID from your database.
+	Name:        "alice@example.com",
+	DisplayName: "Alice",
+}
+
+options, err := w.BeginRegistration(user)
+if err != nil {
+	return err
+}
+
+// Store this on the server before returning options as JSON to the browser.
+err = store.SaveChallenge(
+	options.Challenge,
+	user.ID,
+	webauthn.CeremonyRegistration,
+	time.Now().Add(5*time.Minute),
+)
+if err != nil {
+	return err
+}
+
+returnJSON(options)
+```
+
+When the browser returns its response, retrieve the trusted challenge and finish registration. The callback must delete
+the challenge and insert the verified credential in **one database transaction**:
+
+```go
+var response webauthn.PublicKeyCredential
+if err := response.Parse(requestBody); err != nil {
+	return err
+}
+
+// Find the server-side record using the challenge reported in clientDataJSON.
+pending, err := store.FindChallenge(
+	response.ClientData().Challenge,
+	webauthn.CeremonyRegistration,
+)
+if err != nil {
+	return err // Missing, expired, already used, or wrong ceremony.
+}
+
+result, err := w.FinishRegistration(
+	webauthn.RegistrationData{
+		ClientDataJSON:    response.ClientDataJSON,
+		AttestationObject: response.AttestationObject,
+	},
+	pending.Challenge, // Trusted value loaded from the server-side store.
+	func(challenge string, ceremony webauthn.CeremonyType, credential webauthn.RegistrationResult) error {
+		// This method must atomically:
+		// 1. delete the matching unexpired challenge, and
+		// 2. insert credential.CredentialID, PublicKey, and SignCount for pending.UserID.
+		return store.CommitRegistration(pending.UserID, challenge, ceremony, credential)
+	},
+)
+if err != nil {
+	return err
+}
+
+log.Printf("registered credential %s", result.CredentialID)
+```
+
+`store.SaveChallenge`, `store.FindChallenge`, `store.CommitRegistration`, and `returnJSON` are deliberately descriptive
+placeholders for your own database and HTTP code. A concrete SQLite implementation is available in
+[example/db.go](./example/db.go).
+
+### Login example
+
+To begin login, load the user's credential ID, create options, and store the new challenge:
+
+```go
+credential, err := store.CredentialForUser("alice@example.com")
+if err != nil {
+	return err
+}
+
+options, err := w.BeginLogin([]string{credential.ID})
+if err != nil {
+	return err
+}
+if err := store.SaveChallenge(
+	options.Challenge,
+	credential.UserHandle,
+	webauthn.CeremonyAuthentication,
+	time.Now().Add(5*time.Minute),
+); err != nil {
+	return err
+}
+
+returnJSON(options)
+```
+
+After the browser signs the challenge, verify the assertion using a credential record loaded entirely from your
+database:
+
+```go
+var response webauthn.PublicKeyCredentialAssertion
+if err := response.Parse(requestBody); err != nil {
+	return err
+}
+
+pending, err := store.FindChallenge(response.GetChallenge(), webauthn.CeremonyAuthentication)
+if err != nil {
+	return err
+}
+credential, err := store.CredentialForUserID(pending.UserID)
+if err != nil {
+	return err
+}
+
+result, err := w.FinishLogin(
+	&webauthn.LoginData{
+		ClientDataJSON: response.ClientDataJSON,
+		AuthData:       response.AuthenticatorData,
+		Signature:      response.Signature,
+		UserHandle:     response.UserHandle,
+		CredentialID:   response.ID,
+		StoredCredential: webauthn.StoredCredential{
+			ID:         credential.ID,
+			PublicKey:  credential.PublicKey,
+			SignCount:  credential.SignCount,
+			UserHandle: credential.UserHandle,
+		},
+	},
+	pending.Challenge,
+	func(challenge string, ceremony webauthn.CeremonyType, credentialID string, oldCount, newCount uint32) error {
+		// Atomically consume the challenge and update the counter only if it still equals oldCount.
+		return store.CommitLogin(challenge, ceremony, credentialID, oldCount, newCount)
+	},
+)
+if err != nil {
+	return err // Do not create an application session.
+}
+
+log.Printf("login accepted; user verified: %t", result.UserVerified)
+```
+
+Only after `FinishLogin` succeeds should your application create its normal authenticated cookie or session.
+
+### Why are the callbacks atomic?
+
+Imagine that registration deletes the one-time challenge and the database crashes before saving the credential. The user
+cannot retry because the challenge is already gone. Conversely, saving a credential without consuming its challenge can
+allow the same response to be processed again. A single transaction guarantees that either both changes happen or
+neither happens.
+
+### Exact callback contract
 
 Please refer to the [example](./example) folder for a complete example (with SQLite3 support) of how to use the library.
 The key methods are BeginRegistration, FinishRegistration, BeginLogin, and FinishLogin. You must provide the trusted
 ceremony state and transactional persistence callbacks used by the finish methods.
 
-The finish methods require the challenge previously returned by the matching beginning method and retrieved from the
+The finish methods require the challenge previously returned by the matching begin method and retrieved from the
 trusted server-side ceremony state. `FinishRegistration` requires a `RegistrationStateConsumer` that atomically consumes
 the exact, unexpired registration challenge and persists the verified credential while rejecting duplicate credential
 IDs.
@@ -117,7 +302,8 @@ from one trusted database record. The verifier rejects a response credential ID 
 
 > [!IMPORTANT]
 > This is a breaking API requirement: completion calls without a trusted ceremony state and the appropriate atomic
-> consumer are deliberately rejected.
+> consumer are deliberately rejected. `RegistrationStateConsumer` replaces the former `ChallengeConsumer`; registration
+> callbacks must now persist the verified credential and consume its challenge in one transaction.
 
 ### Key Caller Responsibilities:
 
