@@ -8,7 +8,7 @@ require (
 	github.com/MrBoombastic/WebAuthn2Go v0.4.2
 	github.com/gofiber/fiber/v2 v2.52.15
 	github.com/google/uuid v1.6.0
-	github.com/ncruces/go-sqlite3 v0.35.1
+	github.com/ncruces/go-sqlite3 v0.35.3
 )
 
 replace github.com/MrBoombastic/WebAuthn2Go => ../
@@ -25,7 +25,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v3 v3.1.35302 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
