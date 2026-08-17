@@ -2,7 +2,7 @@ module github.com/MrBoombastic/WebAuthn2Go
 
 go 1.25.0
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/go-webauthn/webauthn v0.17.4
