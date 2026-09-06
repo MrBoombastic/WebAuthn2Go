@@ -2,7 +2,7 @@ module example
 
 go 1.26.0
 
-toolchain go1.26.6
+toolchain go1.27.1
 
 require (
 	github.com/MrBoombastic/WebAuthn2Go v0.4.2
