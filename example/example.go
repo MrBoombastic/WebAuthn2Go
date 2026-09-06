@@ -5,11 +5,13 @@ import (
 	"log"
 	"time"
 
+	"github.com/gofiber/fiber/v3/middleware/static"
+
 	webauthn "github.com/MrBoombastic/WebAuthn2Go"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/logger"
+	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/google/uuid"
 	_ "github.com/ncruces/go-sqlite3/driver"
 )
@@ -28,7 +30,7 @@ type UserSessionData struct {
 }
 
 // sendJSONError sends a JSON error response with a specific status code.
-func sendJSONError(c *fiber.Ctx, statusCode int, message string, err error) error {
+func sendJSONError(c fiber.Ctx, statusCode int, message string, err error) error {
 	log.Printf("Error: %s (Detail: %v)", message, err)
 	return c.Status(statusCode).JSON(fiber.Map{
 		"error": message,
@@ -79,7 +81,7 @@ func main() {
 	}
 
 	// Initialize Fiber app
-	app := fiber.New(fiber.Config{AppName: "WebAuthn2Go", DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{AppName: "WebAuthn2Go"})
 
 	app.Use(logger.New())
 	app.Use(recover.New())
@@ -91,22 +93,22 @@ func main() {
 	app.Post("/login/finish", finishLogin)
 
 	// Serve static
-	app.Static("/", "./static")
+	app.Get("/*", static.New("./static"))
 
 	port := ":8080"
 	log.Printf("Starting example server on http://localhost%s", port)
-	log.Fatal(app.Listen(port))
+	log.Fatal(app.Listen(port, fiber.ListenConfig{DisableStartupMessage: true}))
 }
 
 // /register/begin endpoint
-func beginRegistration(c *fiber.Ctx) error {
+func beginRegistration(c fiber.Ctx) error {
 	// 1. Parse request body for username and email
 	var reqBody struct {
 		Username string `json:"username"`
 		Email    string `json:"email"`
 	}
 	// Using fiber's BodyParser to parse the request body
-	if err := c.BodyParser(&reqBody); err != nil {
+	if err := c.Bind().Body(&reqBody); err != nil {
 		return sendJSONError(c, fiber.StatusBadRequest, "Failed to parse request body", err)
 	}
 	if reqBody.Username == "" || reqBody.Email == "" {
@@ -158,7 +160,7 @@ func beginRegistration(c *fiber.Ctx) error {
 }
 
 // /register/finish endpoint
-func finishRegistration(c *fiber.Ctx) error {
+func finishRegistration(c fiber.Ctx) error {
 	// 1. Parse request payload
 	var payload webauthn.PublicKeyCredential
 	// Using library's method to parse the request body
@@ -221,13 +223,13 @@ func finishRegistration(c *fiber.Ctx) error {
 }
 
 // /login/begin endpoint
-func beginLogin(c *fiber.Ctx) error {
+func beginLogin(c fiber.Ctx) error {
 	// 1. Parse request body for email
 	var reqBody struct {
 		Email string `json:"email"`
 	}
 	// Using fiber's BodyParser to parse the request body
-	if err := c.BodyParser(&reqBody); err != nil {
+	if err := c.Bind().Body(&reqBody); err != nil {
 		return sendJSONError(c, fiber.StatusBadRequest, "Failed to parse request body", err)
 	}
 	if reqBody.Email == "" {
@@ -268,7 +270,7 @@ func beginLogin(c *fiber.Ctx) error {
 }
 
 // /login/finish endpoint
-func finishLogin(c *fiber.Ctx) error {
+func finishLogin(c fiber.Ctx) error {
 	// 1. Parse request payload
 	var payload webauthn.PublicKeyCredentialAssertion
 	// Using library's method to parse the request body
