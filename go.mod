@@ -7,7 +7,7 @@ toolchain go1.27.1
 require (
 	github.com/go-webauthn/webauthn v0.18.1
 	github.com/google/uuid v1.6.0
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.59.0
 )
 
 require (
