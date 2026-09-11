@@ -53,7 +53,7 @@ Used sources:
 - https://www.w3.org/TR/webauthn/ – THE specification
 
 > [!WARNING]
-> This library requires Go 1.25 or newer.
+> This library requires Go 1.26 or newer. Check out older versions if you need Go 1.25+.
 
 ## Installation
 
