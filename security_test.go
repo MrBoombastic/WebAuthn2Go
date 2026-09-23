@@ -268,6 +268,29 @@ func TestValidateCredentialPublicKeyRejectsOKPMasqueradingAsES256(t *testing.T) 
 	}
 
 	_, err = validateCredentialPublicKey(keyBytes)
+	if !errors.Is(err, ErrInvalidPublicKey) && !errors.Is(err, ErrUnsupportedCredentialAlgorithm) {
+		t.Fatalf("expected ErrInvalidPublicKey or ErrUnsupportedCredentialAlgorithm, got %v", err)
+	}
+}
+
+func TestValidateCredentialPublicKeyRejectsOKPKey(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	keyBytes, err := webauthncbor.Marshal(webauthncose.OKPPublicKeyData{
+		PublicKeyData: webauthncose.PublicKeyData{
+			KeyType:   int64(webauthncose.OctetKey),
+			Algorithm: int64(webauthncose.AlgEdDSA),
+		},
+		Curve:  int64(webauthncose.Ed25519),
+		XCoord: publicKey,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	_, err = validateCredentialPublicKey(keyBytes)
 	if !errors.Is(err, ErrUnsupportedCredentialAlgorithm) {
 		t.Fatalf("expected ErrUnsupportedCredentialAlgorithm, got %v", err)
 	}

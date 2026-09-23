@@ -1,3 +1,4 @@
 .idea/
 WebAuthn2Go.iml
 *.db
+*.exe
