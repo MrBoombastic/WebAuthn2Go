@@ -90,35 +90,21 @@ func (w *WebAuthn) ParseAuthenticatorData(authDataBytes []byte) (*ParsedAuthData
 		}
 		parsed.CredentialID = authDataBytes[AToffset : AToffset+credIDLen]
 		AToffset += credIDLen
-
-		// Credential Public Key (COSE format) follows the credential ID
-		// This Unmarshal-Marshal masturbation from CBOR lib magically (allowExtraData) ignores Extension Data.
-		// That way we can calculate the offset and retrieve ED on our own, if present.
-		var cborData any
-		if err = webauthncbor.Unmarshal(authDataBytes[AToffset:], &cborData); err != nil {
-			return nil, err
+		if AToffset == authDataLength {
+			return nil, ErrATFlagButNoData
 		}
-		credentialKeyBytes, err := webauthncbor.Marshal(cborData)
+
+		// Decode only the COSE key; extension data is a separate CBOR item.
+		var credentialKeyBytes webauthncbor.RawMessage
+		keyLength, err := webauthncbor.UnmarshalFirst(authDataBytes[AToffset:], &credentialKeyBytes)
 		if err != nil {
 			return nil, err
 		}
-
-		// Now we have everything
-		remainingData = remainingData - len(credentialKeyBytes) - credIDLen - 16 - 2
-		if remainingData < 0 {
-			return nil, ErrInvalidAuthenticatorData
+		remainingData = authDataLength - AToffset - keyLength
+		if _, err := webauthncose.ParsePublicKey(credentialKeyBytes); err != nil {
+			return nil, ErrParsingCOSEKey
 		}
-
-		if len(credentialKeyBytes) > 0 {
-			_, err := webauthncose.ParsePublicKey(credentialKeyBytes)
-			if err != nil && parsed.Flags&0x80 == 0 {
-				return nil, ErrParsingCOSEKey
-			}
-			parsed.CredentialPubKeyBytes = credentialKeyBytes
-		} else if parsed.Flags&0x80 == 0 {
-			// AT flag set, but no bytes remain for public key, and ED not set.
-			return nil, ErrATFlagButNoData
-		}
+		parsed.CredentialPubKeyBytes = credentialKeyBytes
 	}
 
 	if w.Config.Debug {
