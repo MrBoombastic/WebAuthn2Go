@@ -3,6 +3,7 @@ package webauthn
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -39,6 +40,7 @@ func TestRegistrationAuthenticatorExtensions(t *testing.T) {
 		{"with extensions", true, extensions, nil},
 		{"extensions without ED", false, extensions, ErrInvalidAuthenticatorData},
 		{"ED without extensions", true, nil, ErrEDFlagButNoData},
+		{"null extension map", true, []byte{0xf6}, ErrFailedDecodeExtensionData},
 		{"truncated extensions", true, extensions[:len(extensions)-1], ErrFailedDecodeExtensionData},
 		{"trailing data", true, append(append([]byte(nil), extensions...), 0), ErrFailedDecodeExtensionData},
 	} {
@@ -90,5 +92,123 @@ func TestParseAuthenticatorDataRejectsMissingPublicKey(t *testing.T) {
 		if !errors.Is(err, ErrATFlagButNoData) {
 			t.Fatalf("flags %#x: expected ErrATFlagButNoData, got %v", flags, err)
 		}
+	}
+}
+
+func TestRegistrationCredProtectPolicy(t *testing.T) {
+	challenge := testChallenge(3)
+	data, _ := validRegistrationData(t, challenge)
+	encoded, err := base64.RawURLEncoding.DecodeString(data.AttestationObject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original attestationObject
+	if err := webauthncbor.Unmarshal(encoded, &original); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		minimum    uint8
+		extensions map[string]any
+		want       error
+	}{
+		{"older key without policy", 0, nil, nil},
+		{"unknown extension", 0, map[string]any{"future-extension": true}, nil},
+		{"level 1", 0, map[string]any{"credProtect": 1}, nil},
+		{"level 2", 0, map[string]any{"credProtect": 2}, nil},
+		{"level 3", 0, map[string]any{"credProtect": 3}, nil},
+		{"zero", 0, map[string]any{"credProtect": 0}, ErrInvalidCredProtect},
+		{"above range", 0, map[string]any{"credProtect": 4}, ErrInvalidCredProtect},
+		{"negative", 0, map[string]any{"credProtect": -1}, ErrInvalidCredProtect},
+		{"string", 0, map[string]any{"credProtect": "2"}, ErrInvalidCredProtect},
+		{"boolean", 0, map[string]any{"credProtect": true}, ErrInvalidCredProtect},
+		{"float", 0, map[string]any{"credProtect": 2.0}, ErrInvalidCredProtect},
+		{"null", 0, map[string]any{"credProtect": nil}, ErrInvalidCredProtect},
+		{"missing required extension", 2, nil, ErrCredProtectPolicyNotMet},
+		{"empty extension map", 2, map[string]any{}, ErrCredProtectPolicyNotMet},
+		{"different extension", 2, map[string]any{"hmac-secret": true}, ErrCredProtectPolicyNotMet},
+		{"lower level", 2, map[string]any{"credProtect": 1}, ErrCredProtectPolicyNotMet},
+		{"requested level", 2, map[string]any{"credProtect": 2}, nil},
+		{"higher level", 2, map[string]any{"credProtect": 3}, nil},
+		{"required UV level", 3, map[string]any{"credProtect": 2}, ErrCredProtectPolicyNotMet},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newTestWebAuthn(t, UVPreferred)
+			w.Config.MinCredProtect = tc.minimum
+			att := original
+			att.AuthData = append([]byte(nil), original.AuthData...)
+			if tc.extensions != nil {
+				tail, err := webauthncbor.Marshal(tc.extensions)
+				if err != nil {
+					t.Fatal(err)
+				}
+				att.AuthData[32] |= 0x80
+				att.AuthData = append(att.AuthData, tail...)
+			}
+			encoded, err := webauthncbor.Marshal(att)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := data
+			input.AttestationObject = base64.RawURLEncoding.EncodeToString(encoded)
+			committed := false
+			_, err = w.FinishRegistration(input, challenge, func(_ string, _ CeremonyType, _ RegistrationResult) error {
+				committed = true
+				return nil
+			})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("expected %v, got %v", tc.want, err)
+			}
+			if committed != (tc.want == nil) {
+				t.Fatalf("unexpected commit: %v", committed)
+			}
+		})
+	}
+}
+
+func TestBeginRegistrationCredProtectOptions(t *testing.T) {
+	w := newTestWebAuthn(t, UVPreferred)
+	for level, policy := range []string{"", "userVerificationOptional", "userVerificationOptionalWithCredentialIDList", "userVerificationRequired"} {
+		config := *w.Config
+		config.MinCredProtect = uint8(level)
+		configured, err := New(&config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts, err := configured.BeginRegistration(UserEntity{ID: []byte{1}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if level == 0 {
+			if bytes.Contains(encoded, []byte(`"extensions"`)) {
+				t.Fatal("default options requested extensions")
+			}
+		} else if opts.Extensions["credentialProtectionPolicy"] != policy || opts.Extensions["enforceCredentialProtectionPolicy"] != true {
+			t.Fatalf("level %d: unexpected extension request: %v", level, opts.Extensions)
+		}
+	}
+	for _, level := range []uint8{4, 255} {
+		config := *w.Config
+		config.MinCredProtect = level
+		if _, err := New(&config); !errors.Is(err, ErrInvalidMinCredProtect) {
+			t.Fatalf("level %d: expected invalid policy, got %v", level, err)
+		}
+	}
+}
+
+func TestLoginDoesNotRequireRegistrationCredProtectExtension(t *testing.T) {
+	w := newTestWebAuthn(t, UVRequired)
+	w.Config.MinCredProtect = 3
+	challenge := testChallenge(3)
+	data := signedLoginData(t, challenge, 0x05, 1)
+	_, err := w.FinishLogin(data, challenge, func(_ string, _ CeremonyType, _ string, _, _ uint32) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

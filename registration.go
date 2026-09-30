@@ -37,6 +37,17 @@ func (w *WebAuthn) BeginRegistration(user UserEntity) (navigator *BeginRegistrat
 		return nil, fmt.Errorf("%w: %w", ErrGeneratingChallenge, err)
 	}
 	// FLOW 3: return options, done
+	var extensions map[string]any
+	if w.Config.MinCredProtect > 3 {
+		return nil, ErrInvalidMinCredProtect
+	}
+	if w.Config.MinCredProtect != 0 {
+		policies := [...]string{"", "userVerificationOptional", "userVerificationOptionalWithCredentialIDList", "userVerificationRequired"}
+		extensions = map[string]any{
+			"credentialProtectionPolicy":        policies[w.Config.MinCredProtect],
+			"enforceCredentialProtectionPolicy": true,
+		}
+	}
 	return &BeginRegistrationOptions{
 		Challenge:        challenge,
 		User:             user,
@@ -45,6 +56,7 @@ func (w *WebAuthn) BeginRegistration(user UserEntity) (navigator *BeginRegistrat
 		Attestation:      w.Config.Attestation,
 		UserVerification: w.Config.UserVerification,
 		RP:               RelyingPartyEntity{ID: w.Config.RPID, Name: w.Config.RPDisplayName},
+		Extensions:       extensions,
 	}, nil
 }
 
@@ -118,6 +130,16 @@ func (w *WebAuthn) FinishRegistration(data RegistrationData, expectedChallenge s
 	}
 	if authData.Flags&0x40 == 0 {
 		return nil, ErrMissingAttestedCredentialData
+	}
+	if w.Config.MinCredProtect > 3 {
+		return nil, ErrInvalidMinCredProtect
+	}
+	if w.Config.MinCredProtect != 0 {
+		// The parser has checked the type and range when credProtect is present.
+		level, present := authData.Extensions["credProtect"].(uint64)
+		if !present || level < uint64(w.Config.MinCredProtect) {
+			return nil, ErrCredProtectPolicyNotMet
+		}
 	}
 
 	// Check UV flag (bit 2) in authData.Flags

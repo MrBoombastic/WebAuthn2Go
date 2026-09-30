@@ -68,6 +68,10 @@ type Config struct {
 	UserVerification UserVerificationRequirement // Default User Verification Requirement
 	Attestation      AttestationPreference       // Default Attestation Preference
 	Debug            bool                        // Enable debug logging
+	// MinCredProtect requires a reported credential protection level at registration:
+	// 0: optional, 1: UV optional, 2: UV or credential ID list, 3: UV required.
+	// This does not replace login UV checks or cryptographic attestation verification.
+	MinCredProtect uint8
 }
 
 // WebAuthn struct holds the configuration and manages WebAuthn operations.
@@ -170,6 +174,7 @@ type BeginRegistrationOptions struct {
 	Timeout          uint32                      `json:"timeout"`
 	Attestation      AttestationPreference       `json:"attestation"`
 	UserVerification UserVerificationRequirement `json:"userVerification,omitempty"`
+	Extensions       map[string]any              `json:"extensions,omitempty"`
 }
 
 type RelyingPartyEntity struct {

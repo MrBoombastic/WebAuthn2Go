@@ -20,6 +20,9 @@ func New(config *Config) (*WebAuthn, error) {
 	if !config.UserVerification.IsValid() {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidUserVerification, config.UserVerification)
 	}
+	if config.MinCredProtect > 3 {
+		return nil, ErrInvalidMinCredProtect
+	}
 
 	if len(config.RPOrigins) == 0 {
 		return nil, ErrInvalidRPOrigins

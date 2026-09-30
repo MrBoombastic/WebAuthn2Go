@@ -126,8 +126,14 @@ func (w *WebAuthn) ParseAuthenticatorData(authDataBytes []byte) (*ParsedAuthData
 		}
 
 		err := webauthncbor.Unmarshal(extensionBytes, &parsed.Extensions)
-		if err != nil {
+		if err != nil || parsed.Extensions == nil {
 			return nil, ErrFailedDecodeExtensionData
+		}
+		if value, present := parsed.Extensions["credProtect"]; present {
+			level, valid := value.(uint64)
+			if !valid || level < 1 || level > 3 {
+				return nil, ErrInvalidCredProtect
+			}
 		}
 		if w.Config.Debug {
 			log.Printf("Parsed extensions: %v\n", parsed.Extensions)

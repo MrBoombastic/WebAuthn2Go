@@ -19,7 +19,12 @@ authentication.
 * **Sign Count Protection:** Checks for increasing sign counts to help prevent replay attacks (requires secure storage
   by the caller).
 * **AAGUID Lookup:** Provides a utility to look up authenticator names based on AAGUID.
-* **Extension Support:** Basic support for WebAuthn extensions.
+* **Extension Support:** Parses authenticator extensions and validates `credProtect` when present.
+    * Missing extensions remain valid by default, including for older security keys.
+    * Set `Config.MinCredProtect` to `1`, `2`, or `3` to request credential protection and reject registrations
+      reporting no level or a lower level. `0` (default) does not require this extension.
+    * This checks the reported policy; attestation statements are not cryptographically verified.
+      Continue using `UVRequired` when login must require user verification.
 * **Configuration:** Simple configuration for Relying Party details.
 
 ## Why this library?
