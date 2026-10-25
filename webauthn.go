@@ -24,7 +24,7 @@ func New(config *Config) (*WebAuthn, error) {
 		return nil, ErrInvalidMinCredProtect
 	}
 
-	if len(config.RPOrigins) == 0 {
+	if len(config.RPOrigins) == 0 && len(config.RPRelatedOrigins) == 0 {
 		return nil, ErrInvalidRPOrigins
 	}
 
@@ -44,21 +44,18 @@ func New(config *Config) (*WebAuthn, error) {
 
 	configCopy := *config
 	configCopy.RPID = normalizedRPID
-	configCopy.RPOrigins = make([]string, 0, len(config.RPOrigins))
 
-	parsedOrigins := make([]parsedOriginData, 0, len(config.RPOrigins))
-	for _, originStr := range config.RPOrigins {
-		parsedOrigin, err := parseWebAuthnOrigin(originStr)
-		if err != nil {
-			return nil, fmt.Errorf("%w %s: %w", ErrInvalidRPOrigin, originStr, err)
-		}
-		if !rpidMatchesOrigin(normalizedRPID, parsedOrigin) {
-			return nil, fmt.Errorf("%w: %s is not within %s", ErrRPIDOriginMismatch, parsedOrigin.hostname, normalizedRPID)
-		}
-
-		parsedOrigins = append(parsedOrigins, parsedOrigin)
-		configCopy.RPOrigins = append(configCopy.RPOrigins, parsedOrigin.scheme+"://"+parsedOrigin.host)
+	parsedOrigins, normalizedOrigins, err := parseConfiguredOrigins(config.RPOrigins, normalizedRPID, true)
+	if err != nil {
+		return nil, err
 	}
+	parsedRelated, normalizedRelated, err := parseConfiguredOrigins(config.RPRelatedOrigins, normalizedRPID, false)
+	if err != nil {
+		return nil, err
+	}
+	configCopy.RPOrigins = normalizedOrigins
+	configCopy.RPRelatedOrigins = normalizedRelated
+	parsedOrigins = append(parsedOrigins, parsedRelated...)
 
 	if configCopy.Debug {
 		log.Println("INFO: WebAuthn debug enabled, config:")
@@ -69,6 +66,26 @@ func New(config *Config) (*WebAuthn, error) {
 		Config:          &configCopy,
 		parsedRPOrigins: parsedOrigins,
 	}, nil
+}
+
+// parseConfiguredOrigins parses and normalizes configured origins. With withinRPID set, every origin must be the host
+// of the RP ID or a subdomain of it; related origins are exempt from that single rule and from nothing else.
+func parseConfiguredOrigins(origins []string, rpid string, withinRPID bool) ([]parsedOriginData, []string, error) {
+	parsed := make([]parsedOriginData, 0, len(origins))
+	normalized := make([]string, 0, len(origins))
+	for _, originStr := range origins {
+		parsedOrigin, err := parseWebAuthnOrigin(originStr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w %s: %w", ErrInvalidRPOrigin, originStr, err)
+		}
+		if withinRPID && !rpidMatchesOrigin(rpid, parsedOrigin) {
+			return nil, nil, fmt.Errorf("%w: %s is not within %s", ErrRPIDOriginMismatch, parsedOrigin.hostname, rpid)
+		}
+
+		parsed = append(parsed, parsedOrigin)
+		normalized = append(normalized, parsedOrigin.scheme+"://"+parsedOrigin.host)
+	}
+	return parsed, normalized, nil
 }
 
 // isAllowedOrigin checks if the configuration allows the provided origin.

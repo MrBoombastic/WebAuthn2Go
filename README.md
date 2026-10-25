@@ -109,6 +109,18 @@ if err != nil {
 > * `RPOrigins` **must** include all origins (scheme + host + port if non-default) from which WebAuthn requests will
     originate. Mismatched origins will cause browser errors.
 
+### Moving to a new domain
+
+Passkeys stay bound to their RP ID. After a move, keep the old `RPID` and list the new origin in `RPRelatedOrigins`
+(WebAuthn Level 3 related origins; it waives only the "origin within `RPID`" rule):
+
+```go
+RPID: "old.example", RPRelatedOrigins: []string{"https://new.example"},
+```
+
+`https://old.example/.well-known/webauthn` must answer `200` with `application/json`, no redirect:
+`{"origins": ["https://new.example"]}`. Needs Chrome/Edge 128+, Safari 18+ or Firefox 152+.
+
 ## Usage Overview
 
 ### WebAuthn in plain English
@@ -368,7 +380,7 @@ popular libraries is a safer choice.
   atomically advances the matching credential's counter together with challenge consumption.
 * **Origin/RP ID Configuration:** `RPOrigins` must be exact HTTPS origins with no path, query, fragment, or user info
   (`http://localhost` is the sole HTTP exception). `RPID` must be a valid registrable domain (or localhost/IP) that
-  matches every configured origin.
+  matches every configured origin (`RPOrigins`); only origins in `RPRelatedOrigins` are exempt from that rule.
 * **Attestation Verification:** This library currently **does not** perform cryptographic verification of attestation
   statements for `indirect` or `packed` formats.
   It only parses the authenticator data.

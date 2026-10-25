@@ -190,6 +190,97 @@ func TestNewRejectsUnsafeOrInconsistentOrigins(t *testing.T) {
 	}
 }
 
+func relatedOriginsConfig(origins, related []string) *Config {
+	return &Config{
+		RPID:             "old.example",
+		RPDisplayName:    "Example",
+		RPOrigins:        origins,
+		RPRelatedOrigins: related,
+		Timeout:          60_000,
+		UserVerification: UVPreferred,
+		Attestation:      AttestationNone,
+	}
+}
+
+func TestNewAcceptsRelatedOriginsOutsideRPID(t *testing.T) {
+	// The moved app: every origin is outside the RP ID, so RPOrigins stays empty.
+	w, err := New(relatedOriginsConfig(nil, []string{"https://NEW.example:443"}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if len(w.Config.RPOrigins) != 0 || len(w.Config.RPRelatedOrigins) != 1 || w.Config.RPRelatedOrigins[0] != "https://new.example" {
+		t.Fatalf("unexpected normalized config: %#v", w.Config)
+	}
+	for origin, want := range map[string]bool{"https://new.example": true, "https://evil.example": false, "https://old.example": false} {
+		allowed, _ := w.isAllowedOrigin(origin)
+		if allowed != want {
+			t.Fatalf("isAllowedOrigin(%q) = %v, want %v", origin, allowed, want)
+		}
+	}
+
+	// Both lists together.
+	w, err = New(relatedOriginsConfig([]string{"https://login.old.example"}, []string{"https://new.example"}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	for _, origin := range []string{"https://login.old.example", "https://new.example"} {
+		if allowed, err := w.isAllowedOrigin(origin); !allowed {
+			t.Fatalf("expected %s to be allowed, err=%v", origin, err)
+		}
+	}
+}
+
+func TestRelatedOriginsWaiveOnlyTheRPIDRule(t *testing.T) {
+	tests := []struct {
+		name    string
+		origins []string
+		related []string
+		want    error
+	}{
+		{name: "unrelated origin in RPOrigins is still rejected", origins: []string{"https://new.example"}, related: []string{"https://other.example"}, want: ErrRPIDOriginMismatch},
+		{name: "related origin over http", related: []string{"http://new.example"}, want: ErrInsecureOrigin},
+		{name: "related origin with path", related: []string{"https://new.example/app"}, want: ErrInvalidRPOrigin},
+		{name: "related origin with user info", related: []string{"https://attacker@new.example"}, want: ErrInvalidRPOrigin},
+		{name: "related origin that is not an origin", related: []string{"not an origin"}, want: ErrInvalidRPOrigin},
+		{name: "no origins at all", want: ErrInvalidRPOrigins},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := New(relatedOriginsConfig(tt.origins, tt.related)); !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestFinishLoginAcceptsRelatedOriginAndRejectsUnlistedOne(t *testing.T) {
+	w, err := New(&Config{
+		RPID:             "example.com",
+		RPDisplayName:    "Example",
+		RPOrigins:        []string{"https://example.com"},
+		RPRelatedOrigins: []string{"https://app.example.net"},
+		Timeout:          60_000,
+		UserVerification: UVRequired,
+		Attestation:      AttestationNone,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	challenge := testChallenge(1)
+	consume := func(string, CeremonyType, string, uint32, uint32) error { return nil }
+
+	// The RP ID hash in the authenticator data stays example.com's; only the page's origin differs.
+	if _, err := w.FinishLogin(signedLoginDataFromOrigin(t, "https://app.example.net", challenge, 0x05, 1), challenge, consume); err != nil {
+		t.Fatalf("expected login from the related origin to succeed, got %v", err)
+	}
+
+	_, err = w.FinishLogin(signedLoginDataFromOrigin(t, "https://evil.example", challenge, 0x05, 1), challenge, consume)
+	if !errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("expected ErrOriginNotAllowed for an unlisted origin, got %v", err)
+	}
+}
+
 func TestOriginNormalizationHandlesDefaultHTTPSPort(t *testing.T) {
 	w, err := New(&Config{
 		RPID:             "EXAMPLE.COM",
@@ -421,13 +512,18 @@ func validRegistrationData(t *testing.T, challenge string) (RegistrationData, st
 
 func signedLoginData(t *testing.T, challenge string, flags byte, signCount byte) *LoginData {
 	t.Helper()
+	return signedLoginDataFromOrigin(t, "https://example.com", challenge, flags, signCount)
+}
+
+func signedLoginDataFromOrigin(t *testing.T, origin, challenge string, flags byte, signCount byte) *LoginData {
+	t.Helper()
 
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("GenerateKey() error = %v", err)
 	}
 
-	clientData := testClientData(t, "webauthn.get", challenge, "https://example.com")
+	clientData := testClientData(t, "webauthn.get", challenge, origin)
 	clientDataBytes, err := base64.RawURLEncoding.DecodeString(clientData)
 	if err != nil {
 		t.Fatalf("DecodeString(clientData) error = %v", err)

@@ -72,6 +72,12 @@ type Config struct {
 	// 0: optional, 1: UV optional, 2: UV or credential ID list, 3: UV required.
 	// This does not replace login UV checks or cryptographic attestation verification.
 	MinCredProtect uint8
+	// RPRelatedOrigins are origins outside RPID that may still use it (WebAuthn Level 3 "related origin requests"),
+	// e.g. the new domain of an app whose passkeys were registered under the old one. Browsers only allow this when
+	// https://<RPID>/.well-known/webauthn lists the origin as {"origins": ["https://new.example"]}, so the site of
+	// the RP ID has to keep serving that file. Each origin is validated like RPOrigins (HTTPS, no path, ...); only the
+	// "within RPID" rule is waived, and only for this list. At least one origin is required across both lists.
+	RPRelatedOrigins []string
 }
 
 // WebAuthn struct holds the configuration and manages WebAuthn operations.
