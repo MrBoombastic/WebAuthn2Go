@@ -2,3 +2,4 @@
 WebAuthn2Go.iml
 *.db
 *.exe
+.openidea

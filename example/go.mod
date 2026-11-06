@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.27.3
 
 require (
-	github.com/MrBoombastic/WebAuthn2Go v0.7.0
+	github.com/MrBoombastic/WebAuthn2Go v0.8.1
 	github.com/gofiber/fiber/v3 v3.6.1
 	github.com/google/uuid v1.6.0
 	github.com/ncruces/go-sqlite3 v0.36.0
@@ -14,7 +14,6 @@ require (
 replace github.com/MrBoombastic/WebAuthn2Go => ../
 
 require (
-	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.6 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/webauthn v0.18.2 // indirect
