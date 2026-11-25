@@ -8,7 +8,7 @@ require (
 	github.com/MrBoombastic/WebAuthn2Go v0.8.1
 	github.com/gofiber/fiber/v3 v3.6.1
 	github.com/google/uuid v1.6.0
-	github.com/ncruces/go-sqlite3 v0.38.0
+	github.com/ncruces/go-sqlite3 v0.38.1
 )
 
 replace github.com/MrBoombastic/WebAuthn2Go => ../
@@ -34,7 +34,7 @@ require (
 	github.com/valyala/fasthttp v1.75.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.59.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 )
